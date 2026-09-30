@@ -1,0 +1,62 @@
+@import "tailwindcss";
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(
+    to bottom right,
+    #f0f9ff,
+    #ffffff,
+    #e0f2fe
+  );
+}
+
+html, body {
+  width: 100%;
+  overflow-x: hidden; /* 🔥 RIGHT SCROLL FIX */
+}
+
+/* ================= GLOBAL LEAFLET STACKING CONTEXT FIX =================
+   Restricts Leaflet internal elements (tiles, markers, popups, zoom controls)
+   to a local stacking context so they never burst out above Navbars or Modals.
+*/
+.leaflet-container {
+  z-index: 0 !important;
+  position: relative !important;
+}
+
+.leaflet-pane {
+  z-index: 10 !important;
+}
+
+.leaflet-tile-pane {
+  z-index: 10 !important;
+}
+
+.leaflet-overlay-pane {
+  z-index: 20 !important;
+}
+
+.leaflet-marker-pane {
+  z-index: 30 !important;
+}
+
+.leaflet-tooltip-pane {
+  z-index: 40 !important;
+}
+
+.leaflet-popup-pane {
+  z-index: 50 !important;
+}
+
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 60 !important;
+}
+
+.leaflet-control {
+  z-index: 60 !important;
+}
