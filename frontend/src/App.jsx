@@ -19,19 +19,44 @@ import ProtectedRoute from './components/ProtectedRoute'
 
 import axios from 'axios'
 
+axios.defaults.timeout = 30000
+
 axios.interceptors.request.use(config => {
   const token = localStorage.getItem('token')
   if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  console.log(`[API REQUEST] ${config.method?.toUpperCase() || 'GET'} ${config.url}`)
   return config
-}, error => Promise.reject(error))
+}, error => {
+  console.error('[API REQUEST ERROR]', error)
+  return Promise.reject(error)
+})
 
-export const serverUrl =
-  import.meta.env.VITE_SERVER_URL ||
-  (import.meta.env.MODE === 'production'
-    ? 'https://faultline-ai.onrender.com'
-    : 'http://localhost:8000')
+axios.interceptors.response.use(
+  response => {
+    console.log(`[API RESPONSE] ${response.status} ${response.config?.url}`)
+    return response
+  },
+  error => {
+    if (error.response) {
+      console.error(`[API ERROR] ${error.response.status} ${error.config?.url}`, error.response.data)
+    } else if (error.request) {
+      console.error('[API NETWORK ERROR] Detailed diagnostics:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        baseURL: error.config?.baseURL || serverUrl,
+        timeout: error.config?.timeout,
+        message: error.message
+      })
+    } else {
+      console.error('[API ERROR]', error.message)
+    }
+    return Promise.reject(error)
+  }
+)
+
+export const serverUrl = 'https://campus-issue-management-system-g1mh.onrender.com'
 
 function App () {
   useGetCurrentUser()

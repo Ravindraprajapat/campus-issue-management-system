@@ -58,11 +58,13 @@ const Report = () => {
         const formData = new FormData()
         formData.append('image', compressedFile)
 
+        console.log('[IMAGE VERIFY] Image verification request started:', `${serverUrl}/report/report-submit/verify-image`)
         const { data } = await axios.post(
           `${serverUrl}/report/report-submit/verify-image`,
           formData,
           { withCredentials: true }
         )
+        console.log('[IMAGE VERIFY] Response received:', { success: data.success, isValid: data.isValid })
 
         if (data.success && data.isValid) {
           setVerificationToken(data.verificationToken || '')
@@ -75,6 +77,7 @@ const Report = () => {
           setError(msg)
         }
       } catch (err) {
+        console.error('[IMAGE VERIFY] Image verification error:', err.message, err?.response?.data || '')
         setVerificationToken('')
         setPhotoVerificationStatus('invalid')
         const msg = err?.response?.data?.message || 'Photo verification failed. Please upload a clear photo of the issue.'
@@ -189,9 +192,18 @@ const Report = () => {
       formData.append('room', room)
       formData.append('description', description)
 
-      await axios.post(`${serverUrl}/report/report-submit/report`, formData, {
+      console.log('[REPORT] Report submission request started:', {
+        url: `${serverUrl}/report/report-submit/report`,
+        building,
+        room,
+        latitude: location.latitude,
+        longitude: location.longitude
+      })
+
+      const response = await axios.post(`${serverUrl}/report/report-submit/report`, formData, {
         withCredentials: true
       })
+      console.log('[REPORT] Report submission response received, status:', response.status)
 
       setSuccess(true)
       setImage(null)
@@ -210,7 +222,7 @@ const Report = () => {
         navigate('/track-status')
       }, 1500)
     } catch (err) {
-      console.log(err.response)
+      console.error('[REPORT] Report submission error:', err.message, err?.response?.data || '')
       const msg = err?.response?.data?.message || 'Failed to submit issue report'
       setError(msg)
     } finally {

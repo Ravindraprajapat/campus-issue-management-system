@@ -26,14 +26,27 @@ const SignIn = () => {
 
   const handleSignIn = async () => {
     setError('')
+    const requestUrl = `${serverUrl}/api/auth/signin`
+    console.log('[AUTH] Login request started')
+    console.log('[AUTH] Request URL:', requestUrl)
+    console.log('[AUTH] Request method: POST')
+    console.log('[AUTH] Request started at:', new Date().toISOString())
+
     try {
       const result = await axios.post(
-        `${serverUrl}/api/auth/signin`,
+        requestUrl,
         { email, password },
         { withCredentials: true }
       )
+      console.log('[AUTH] Login response received')
+      console.log('[AUTH] Status:', result.status)
+
       const user = result?.data
       if (user?.token) localStorage.setItem('token', user.token)
+      
+      const { token, password: _p, ...safeUserData } = user || {}
+      console.log('[AUTH] Response:', safeUserData)
+
       dispatch(setUserData(user))
 
       if (loginRole === 'admin') {
@@ -60,27 +73,44 @@ const SignIn = () => {
         }
       }
     } catch (err) {
+      console.error('[AUTH] Login error:', err.message)
+      if (err?.response) {
+        console.error('[AUTH] Response status:', err.response.status)
+        console.error('[AUTH] Response data:', err.response.data)
+      } else if (err?.request) {
+        console.error('[AUTH] Network error - No response received from server:', {
+          url: requestUrl,
+          code: err.code,
+          message: err.message
+        })
+      } else {
+        console.error('[AUTH] Setup error:', err.message)
+      }
       setError(err?.response?.data?.message || 'Sign in failed')
     }
   }
 
   const handleGoogleAuth = async () => {
-    const provider = new GoogleAuthProvider()
-    const result = await signInWithPopup(auth, provider)
     try {
-      const { data } = await axios.post(
-        `${serverUrl}/api/auth/google-auth`,
+      const provider = new GoogleAuthProvider()
+      const result = await signInWithPopup(auth, provider)
+      const requestUrl = `${serverUrl}/api/auth/google-auth`
+      console.log('[AUTH] Google auth request started:', requestUrl)
+
+      const { data, status } = await axios.post(
+        requestUrl,
         {
           email: result.user.email,
           name: result.user.displayName
         },
         { withCredentials: true }
       )
+      console.log('[AUTH] Google auth response received, status:', status)
       if (data?.token) localStorage.setItem('token', data.token)
       dispatch(setUserData(data.user || data))
       navigate('/')
     } catch (error) {
-      console.log(error)
+      console.error('[AUTH] Google auth error:', error.message, error?.response?.data || '')
     }
   }
 
