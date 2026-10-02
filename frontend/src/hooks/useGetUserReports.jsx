@@ -10,14 +10,15 @@ const useGetUserReports = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        console.log('[AUTH DEBUG] GET /report/report-submit/reports')
         const result = await axios.get(
           `${serverUrl}/report/report-submit/reports`,
           { withCredentials: true }
         )
-        console.log(result.data.report)
-         dispatch(setReports(result.data.reports));
+        console.log('[AUTH DEBUG] GET /report/report-submit/reports response received')
+        dispatch(setReports(result.data.reports || result.data.report));
       } catch (error) {
-        console.log(error)
+        console.log('[AUTH DEBUG] GET /report/report-submit/reports error:', error.message)
       }
     }
     fetchData()

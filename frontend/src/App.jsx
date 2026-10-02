@@ -23,10 +23,26 @@ axios.defaults.timeout = 30000
 
 axios.interceptors.request.use(config => {
   const token = localStorage.getItem('token')
-  if (token && !config.headers.Authorization) {
-    config.headers.Authorization = `Bearer ${token}`
+  const tokenExists = !!token
+  let authAttached = false
+
+  if (token) {
+    if (config.headers && typeof config.headers.set === 'function') {
+      config.headers.set('Authorization', `Bearer ${token}`)
+      authAttached = true
+    } else if (config.headers) {
+      config.headers['Authorization'] = `Bearer ${token}`
+      authAttached = true
+    } else {
+      config.headers = { Authorization: `Bearer ${token}` }
+      authAttached = true
+    }
   }
+
   console.log(`[API REQUEST] ${config.method?.toUpperCase() || 'GET'} ${config.url}`)
+  console.log(`[AUTH DEBUG] Token available for API request: ${tokenExists}`)
+  console.log(`[AUTH DEBUG] Authorization header attached: ${authAttached}`)
+  console.log(`[AUTH DEBUG] Token storage key: token`)
   return config
 }, error => {
   console.error('[API REQUEST ERROR]', error)

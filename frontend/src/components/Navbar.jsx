@@ -12,7 +12,8 @@ import {
   Users
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
+import { setUserData } from "../redux/userSlice";
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -20,6 +21,7 @@ const Navbar = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useDispatch();
 
   const { userData } = useSelector((state) => state.user);
   const firstLetter = userData?.name?.charAt(0)?.toUpperCase();
@@ -65,6 +67,9 @@ const Navbar = () => {
   const handleLogout = (e) => {
     e.stopPropagation();
     setProfileOpen(false);
+    localStorage.removeItem('token');
+    dispatch(setUserData(null));
+    console.log('[AUTH DEBUG] Token removed on logout from key: token');
     navigate("/signin");
   };
 

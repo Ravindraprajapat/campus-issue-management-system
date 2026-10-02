@@ -74,7 +74,16 @@ const SignUp = () => {
         withCredentials: true
       })
 
-      if (result?.data?.token) localStorage.setItem('token', result.data.token)
+      const hasToken = !!result?.data?.token
+      console.log(`[AUTH DEBUG] Signup token received: ${hasToken}`)
+      if (result?.data?.token) {
+        localStorage.setItem('token', result.data.token)
+        console.log('[AUTH DEBUG] Token stored: true')
+        console.log('[AUTH DEBUG] Token storage key: token')
+      } else {
+        console.log('[AUTH DEBUG] Token stored: false')
+      }
+
       dispatch(setUserData(result.data))
       navigate('/')
     } catch (err) {
@@ -92,7 +101,16 @@ const SignUp = () => {
         { name: result.user.displayName, email: result.user.email, mobile },
         { withCredentials: true }
       )
-      if (data?.token) localStorage.setItem('token', data.token)
+      const hasToken = !!data?.token
+      console.log(`[AUTH DEBUG] Google signup token received: ${hasToken}`)
+      if (data?.token) {
+        localStorage.setItem('token', data.token)
+        console.log('[AUTH DEBUG] Token stored: true')
+        console.log('[AUTH DEBUG] Token storage key: token')
+      } else {
+        console.log('[AUTH DEBUG] Token stored: false')
+      }
+
       dispatch(setUserData(data.user || data))
       navigate('/')
     } catch (err) {

@@ -42,8 +42,16 @@ const SignIn = () => {
       console.log('[AUTH] Status:', result.status)
 
       const user = result?.data
-      if (user?.token) localStorage.setItem('token', user.token)
-      
+      const hasToken = !!user?.token
+      console.log(`[AUTH DEBUG] Login token received: ${hasToken}`)
+      if (user?.token) {
+        localStorage.setItem('token', user.token)
+        console.log('[AUTH DEBUG] Token stored: true')
+        console.log('[AUTH DEBUG] Token storage key: token')
+      } else {
+        console.log('[AUTH DEBUG] Token stored: false')
+      }
+
       const { token, password: _p, ...safeUserData } = user || {}
       console.log('[AUTH] Response:', safeUserData)
 
@@ -106,7 +114,16 @@ const SignIn = () => {
         { withCredentials: true }
       )
       console.log('[AUTH] Google auth response received, status:', status)
-      if (data?.token) localStorage.setItem('token', data.token)
+      const hasToken = !!data?.token
+      console.log(`[AUTH DEBUG] Login token received: ${hasToken}`)
+      if (data?.token) {
+        localStorage.setItem('token', data.token)
+        console.log('[AUTH DEBUG] Token stored: true')
+        console.log('[AUTH DEBUG] Token storage key: token')
+      } else {
+        console.log('[AUTH DEBUG] Token stored: false')
+      }
+
       dispatch(setUserData(data.user || data))
       navigate('/')
     } catch (error) {
