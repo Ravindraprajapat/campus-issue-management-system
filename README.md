@@ -1,4 +1,4 @@
-# Parul University — College Issue Registration & Maintenance Management System
+# UniFix AI — Smart Campus Infrastructure Management
 
 > An automated, role-based campus maintenance management platform connecting Students, University Admins, and Maintenance Staff through location tracking, Google Gemini AI issue verification, Cloudinary media storage, and live 50-meter GPS resolution verification.
 

@@ -152,7 +152,7 @@ const SignIn = () => {
           className="text-3xl font-bold mb-2 text-center"
           style={{ color: primaryColor }}
         >
-          Welcome to Faultline AI
+          Welcome to UniFix AI
         </motion.h1>
 
         <p className="text-gray-600 mb-6 text-center">Sign in to your account</p>

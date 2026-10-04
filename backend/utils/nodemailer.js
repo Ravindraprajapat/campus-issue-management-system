@@ -12,32 +12,73 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Non-blocking Transporter Connection Verification
+if (process.env.EMAIL && process.env.PASS) {
+  console.log('[MAIL] Transporter configured: true')
+  console.log('[MAIL] SMTP connection test started')
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('[MAIL ERROR] SMTP connection verification failed')
+      console.error('[MAIL ERROR] Error code:', error.code || 'UNKNOWN')
+      console.error('[MAIL ERROR] Error message:', error.message)
+      if (error.responseCode) console.error('[MAIL ERROR] Response code:', error.responseCode)
+    } else {
+      console.log('[MAIL] SMTP connection successful')
+    }
+  })
+} else {
+  console.log('[MAIL] Transporter configured: false (EMAIL or PASS missing in environment variables)')
+}
+
 // Preserved existing OTP Email functionality
 export const sendOtpMail = async (to, otp) => {
-  await transporter.sendMail({
-    from: process.env.EMAIL,
-    to: to,  
-    subject: "Reset your Password",
-    html: `<p>Your OTP for password reset is <b>${otp}</b>. This OTP is valid for 10 minutes.</p>`
-  })
+  const hasTransporter = !!(process.env.EMAIL && process.env.PASS)
+  console.log('[MAIL] Sending email: Password Reset OTP')
+  console.log(`[MAIL] Recipient configured: ${!!to}`)
+  console.log(`[MAIL] Transporter configured: ${hasTransporter}`)
+
+  if (!hasTransporter) {
+    console.error('[MAIL ERROR] Email sending skipped: EMAIL or PASS environment variable missing')
+    return
+  }
+
+  try {
+    const info = await transporter.sendMail({
+      from: `"UniFix AI Support" <${process.env.EMAIL}>`,
+      to: to,  
+      subject: "Reset your Password",
+      html: `<p>Your OTP for password reset is <b>${otp}</b>. This OTP is valid for 10 minutes.</p>`
+    })
+    console.log(`[MAIL] Password Reset OTP Email sent successfully to recipient, messageId: ${info.messageId}`)
+  } catch (error) {
+    console.error('[MAIL ERROR] Email sending failed (Password Reset OTP)')
+    console.error('[MAIL ERROR] Error code:', error.code || 'UNKNOWN')
+    console.error('[MAIL ERROR] Error message:', error.message)
+    if (error.responseCode) console.error('[MAIL ERROR] Response code:', error.responseCode)
+  }
 }
 
 // 1. Complaint Registered Email using existing transporter (process.env.EMAIL / process.env.PASS)
 export const sendComplaintRegisteredMail = async (to, report, user) => {
+  const hasTransporter = !!(process.env.EMAIL && process.env.PASS)
+  console.log('[MAIL] Sending email: Complaint Registered')
+  console.log(`[MAIL] Recipient configured: ${!!to}`)
+  console.log(`[MAIL] Transporter configured: ${hasTransporter}`)
+
   try {
-    if (!process.env.EMAIL || !process.env.PASS) {
-      console.log('Nodemailer EMAIL/PASS not configured in .env. Skipping complaint registered email.')
+    if (!hasTransporter) {
+      console.log('[MAIL ERROR] Nodemailer EMAIL/PASS not configured in environment. Skipping complaint registered email.')
       return
     }
 
     const mailOptions = {
-      from: `"Parul University Support" <${process.env.EMAIL}>`,
+      from: `"UniFix AI Support" <${process.env.EMAIL}>`,
       to: to,
       subject: `Campus Issue Report Registered - ${report._id}`,
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
           <h2 style="color: #0284c7;">Hello ${user?.name || 'User'},</h2>
-          <p>Your campus issue report has been successfully registered on FaultLine AI.</p>
+          <p>Your campus issue report has been successfully registered on UniFix AI.</p>
           <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
             <p><strong>Report ID:</strong> ${report._id}</p>
             <p><strong>Issue Type:</strong> ${report.aiAnalysis?.detectedType || 'Campus Issue'}</p>
@@ -48,28 +89,35 @@ export const sendComplaintRegisteredMail = async (to, report, user) => {
           <p>Your report has been forwarded to the concerned Parul University maintenance team.</p>
           <p>You will receive another notification when the issue is resolved.</p>
           <br />
-          <p>Thank you,<br /><strong>Parul University Maintenance Platform</strong></p>
+          <p>Thank you,<br /><strong>UniFix AI — Smart Campus Infrastructure Management</strong></p>
         </div>
       `
     }
 
     const info = await transporter.sendMail(mailOptions)
-    console.log(`Complaint Registration Email sent to ${to}: ${info.messageId}`)
+    console.log(`[MAIL] Complaint Registration Email sent successfully, messageId: ${info.messageId}`)
   } catch (error) {
-    console.error('Complaint Registered Email Error:', error)
+    console.error('[MAIL ERROR] Complaint Registered Email Error:', error.message)
+    if (error.code) console.error('[MAIL ERROR] Error code:', error.code)
+    if (error.responseCode) console.error('[MAIL ERROR] Response code:', error.responseCode)
   }
 }
 
 // 2. Complaint Resolved Email using existing transporter (process.env.EMAIL / process.env.PASS)
 export const sendComplaintResolvedMail = async (to, report, user) => {
+  const hasTransporter = !!(process.env.EMAIL && process.env.PASS)
+  console.log('[MAIL] Sending email: Complaint Resolved')
+  console.log(`[MAIL] Recipient configured: ${!!to}`)
+  console.log(`[MAIL] Transporter configured: ${hasTransporter}`)
+
   try {
-    if (!process.env.EMAIL || !process.env.PASS) {
-      console.log('Nodemailer EMAIL/PASS not configured in .env. Skipping complaint resolved email.')
+    if (!hasTransporter) {
+      console.log('[MAIL ERROR] Nodemailer EMAIL/PASS not configured in environment. Skipping complaint resolved email.')
       return
     }
 
     const mailOptions = {
-      from: `"Parul University Support" <${process.env.EMAIL}>`,
+      from: `"UniFix AI Support" <${process.env.EMAIL}>`,
       to: to,
       subject: `Campus Issue Report Resolved - ${report._id}`,
       html: `
@@ -84,14 +132,16 @@ export const sendComplaintResolvedMail = async (to, report, user) => {
           </div>
           <p>Please open the application to view the updated report details.</p>
           <br />
-          <p>Thank you for helping keep our campus safe and functional!<br /><strong>Parul University Maintenance Platform</strong></p>
+          <p>Thank you for helping keep our campus safe and functional!<br /><strong>UniFix AI — Smart Campus Infrastructure Management</strong></p>
         </div>
       `
     }
 
     const info = await transporter.sendMail(mailOptions)
-    console.log(`Complaint Resolution Email sent to ${to}: ${info.messageId}`)
+    console.log(`[MAIL] Complaint Resolution Email sent successfully, messageId: ${info.messageId}`)
   } catch (error) {
-    console.error('Complaint Resolved Email Error:', error)
+    console.error('[MAIL ERROR] Complaint Resolved Email Error:', error.message)
+    if (error.code) console.error('[MAIL ERROR] Error code:', error.code)
+    if (error.responseCode) console.error('[MAIL ERROR] Response code:', error.responseCode)
   }
 }

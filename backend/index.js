@@ -52,7 +52,7 @@ app.use(cookieParser())
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Faultline AI Backend is running"
+    message: "UniFix AI Backend is running"
   });
 });
 

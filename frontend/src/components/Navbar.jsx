@@ -98,7 +98,7 @@ const Navbar = () => {
             </div>
             <div className="leading-none">
               <div className="font-bold text-lg text-slate-900">
-                Faultline AI
+                UniFix AI
               </div>
               <div className="text-slate-400 text-[10px] tracking-widest uppercase">
                 Parul University
