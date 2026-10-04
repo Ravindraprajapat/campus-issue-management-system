@@ -139,7 +139,7 @@ const SignUp = () => {
             Student Registration
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Campus Issue Registration & Maintenance Management System
+            UniFix AI — Smart Campus Infrastructure Management
           </p>
         </div>
 

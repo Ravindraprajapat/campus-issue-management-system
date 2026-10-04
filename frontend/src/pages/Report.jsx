@@ -247,7 +247,7 @@ const Report = () => {
         </h1>
 
         <p className='text-center text-gray-500 mb-8 text-sm'>
-          Parul University Infrastructure Maintenance System
+          UniFix AI — Smart Campus Infrastructure Management
         </p>
 
         {/* Success Alert */}

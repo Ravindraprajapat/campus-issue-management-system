@@ -77,7 +77,7 @@ const Navbar = () => {
     <div className="fixed top-0 left-0 w-full z-[100]">
       {/* TOP INFO BAR */}
       <div className="bg-blue-600 text-white text-xs md:text-sm py-2 text-center font-medium">
-        🎓 PARUL UNIVERSITY – Campus Issue Registration & Maintenance Management System 🎓
+        🎓 PARUL UNIVERSITY – UniFix AI Smart Campus Infrastructure Management 🎓
       </div>
 
       {/* NAVBAR */}

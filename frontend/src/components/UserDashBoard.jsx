@@ -102,14 +102,14 @@ const UserDashBoard = () => {
           {/* HERO */}
           <motion.div variants={fadeUp} className="text-center mb-28">
             <h1 className="text-4xl md:text-6xl font-bold text-slate-900 mb-6">
-              College Issue Registration System
-              <span className="block text-sky-500 mt-3">
-                Parul University
+              UniFix AI
+              <span className="block text-sky-500 text-2xl md:text-4xl mt-3 font-semibold">
+                Smart Campus Infrastructure Management
               </span>
             </h1>
 
             <p className="text-lg text-slate-500 max-w-3xl mx-auto mb-12">
-              Report classroom, lab, washroom, electrical, AC, and campus facility issues instantly. AI verifies photos and routes reports directly to Parul University maintenance staff.
+              AI-powered campus maintenance platform for reporting, verifying, routing, assigning, and tracking infrastructure issues.
             </p>
 
             <div className="flex flex-col sm:flex-row justify-center gap-5">
