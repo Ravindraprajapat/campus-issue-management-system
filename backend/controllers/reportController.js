@@ -3,10 +3,12 @@ import crypto from 'crypto'
 import dotenv from 'dotenv'
 import { GoogleGenAI } from '@google/genai'
 import Report from '../model/Report.js'
+import Department from '../model/Department.js'
+import IssueType from '../model/IssueType.js'
+import User from '../model/User.js'
 import uploadOnCloudinary from '../utils/cloudinary.js'
 import { sendComplaintRegisteredNotification } from '../utils/notificationService.js'
-import User from '../model/User.js'
-import { getDepartmentForIssue, DEPARTMENTS, normalizeBuilding, normalizeDepartment } from '../utils/departmentMapping.js'
+import { getDepartmentForIssue, normalizeBuilding, normalizeDepartment } from '../utils/departmentMapping.js'
 
 dotenv.config()
 
@@ -16,73 +18,78 @@ const GoogleAi = new GoogleGenAI({
 
 const TICKET_SECRET = process.env.JWT_SECRET || 'faultline_secure_verification_secret_2026'
 
-// Shared Gemini Prompt Text
-const GEMINI_PROMPT_TEXT = `You are an infrastructure and facility issue classification AI for a university campus maintenance management system.
-Analyze the uploaded image carefully for physical infrastructure, equipment, or facility maintenance issues.
+// Build dynamic Gemini classification prompt from active MongoDB Departments and IssueTypes
+export const buildDynamicGeminiPrompt = async (userDescription = '') => {
+  const activeDepartments = await Department.find({ isActive: true }).sort({ name: 1 })
+  const activeIssueTypes = await IssueType.find({ isActive: true }).populate('department', 'name code').sort({ name: 1 })
 
-### VISUAL ISSUE DETECTION RULES:
-1. EVALUATE VISUAL INFRASTRUCTURE ISSUE:
-   - Determine if the image visually depicts a real, plausible physical infrastructure or facility issue.
-   - Set "isValid": true if the photo visually shows a clear, relevant physical infrastructure or facility asset/issue requiring maintenance.
-   - Set "isValid": false if the image:
-     * Is a selfie, face/body portrait, or personal photograph of a person.
-     * Contains NO visible damage, maintenance issue, or relevant infrastructure asset (e.g. clean plain wall, normal room with no issue).
-     * Is an unrelated personal item or object (e.g. pet, food, car, shoe, clothing, personal accessory) with no infrastructure issue.
-     * Is a screenshot, meme, poster, text-only document, or non-photo graphics.
-     * Does not contain sufficient visual evidence of a physical infrastructure or facility issue.
+  const deptListText = activeDepartments.length > 0
+    ? activeDepartments.map(d => `- DepartmentCode: "${d.code}", Name: "${d.name}" (${d.description || 'General maintenance'})`).join('\n')
+    : '- DepartmentCode: "OTHER_MAINTENANCE_ISSUES", Name: "Other Maintenance Issues"'
 
-2. SPECIFIC ISSUE TYPE ("issueType"):
-   - Choose the single best matching issue code:
-     * Electrical: "FAN_NOT_WORKING", "LIGHT_NOT_WORKING", "AC_NOT_WORKING", "SWITCH_DAMAGED", "SOCKET_DAMAGED", "WIRING_ISSUE"
-     * Plumbing: "WATER_LEAKAGE", "TAP_DAMAGED", "PIPE_LEAKAGE", "DRAIN_BLOCKAGE", "FLUSH_PROBLEM", "WATER_SUPPLY_ISSUE"
-     * Infrastructure & Furniture: "CHAIR_DAMAGED", "TABLE_DAMAGED", "CUPBOARD_DAMAGED", "DOOR_DAMAGED", "DOOR_LOCK_DAMAGED", "SHELF_DAMAGED", "WINDOW_DAMAGED", "WALL_DAMAGE", "FLOOR_DAMAGE", "CEILING_DAMAGE"
-     * Washroom: "WASHROOM_CLEANLINESS", "TOILET_DAMAGE", "FLUSH_PROBLEM", "WASH_BASIN_PROBLEM", "WASHROOM_LEAKAGE"
-     * IT & Network: "WIFI_NOT_WORKING", "NETWORK_ISSUE", "LAN_ISSUE", "COMPUTER_NOT_WORKING", "PROJECTOR_NOT_WORKING", "CCTV_NOT_WORKING"
-     * Cleanliness: "GARBAGE_OVERFLOW", "CLEANING_REQUIRED", "WASTE_DISPOSAL", "PEST_ISSUE"
-     * Safety & Security: "BROKEN_RAILING", "FIRE_SAFETY_ISSUE", "EMERGENCY_EXIT_ISSUE", "DANGEROUS_WIRING", "SECURITY_ISSUE"
-     * Lift & Mechanical: "LIFT_NOT_WORKING", "LIFT_DOOR_ISSUE", "GENERATOR_ISSUE", "WATER_PUMP_ISSUE", "MOTOR_ISSUE"
-     * Outdoor & Campus: "ROAD_DAMAGE", "PARKING_ISSUE", "STREET_LIGHT_ISSUE", "DRAINAGE_ISSUE", "GARDEN_ISSUE", "CAMPUS_SIGNBOARD_DAMAGE"
-     * Other: "OTHER_MAINTENANCE"
+  const issueListText = activeIssueTypes.length > 0
+    ? activeIssueTypes.map(it => `- IssueCode: "${it.code}", Name: "${it.name}", DepartmentCode: "${it.departmentCode || it.department?.code}"`).join('\n')
+    : '- IssueCode: "OTHER_MAINTENANCE", Name: "Other Maintenance", DepartmentCode: "OTHER_MAINTENANCE_ISSUES"'
 
-3. DEPARTMENT CLASSIFICATION ("department"):
-   - Choose EXACTLY ONE department from this whitelist:
-     "ELECTRICAL_ISSUES",
-     "PLUMBING_WATER_ISSUES",
-     "INFRASTRUCTURE_FURNITURE_ISSUES",
-     "WASHROOM_ISSUES",
-     "IT_NETWORK_ISSUES",
-     "CLEANLINESS_WASTE_ISSUES",
-     "SAFETY_SECURITY_ISSUES",
-     "LIFT_MECHANICAL_ISSUES",
-     "OUTDOOR_CAMPUS_ISSUES",
-     "OTHER_MAINTENANCE_ISSUES"
+  return `You are an infrastructure and facility issue classification AI for UniFix AI campus maintenance management system.
+Analyze the uploaded image AND the student's text description carefully for physical campus maintenance issues.
 
-4. PHYSICAL SETTING / LOCATION CONTEXT ("collegeContext"):
-   - "CLASSROOM", "LAB", "CORRIDOR", "WASHROOM", "OFFICE", "CANTEEN", "LIBRARY", "CAMPUS_AREA", "OTHER", "UNKNOWN"
+STUDENT PROVIDED DESCRIPTION:
+"${String(userDescription || '').trim() || 'No description provided'}"
 
-5. CONFIDENCE ("confidence"):
-   - A floating-point number between 0.0 and 1.0 indicating visual confidence in the analysis.
+### MANDATORY STRICT RULE: DO NOT INVENT DEPARTMENTS OR ISSUE TYPES.
+You can ONLY choose an issue type code from the AVAILABLE ACTIVE ISSUE TYPES list below.
+You can ONLY choose a department code from the AVAILABLE ACTIVE DEPARTMENTS list below.
 
-6. SEVERITY ("severity"):
-   - An integer score from 1 to 10 rating the severity of the detected physical issue.
+AVAILABLE ACTIVE DEPARTMENTS:
+${deptListText}
+
+AVAILABLE ACTIVE ISSUE TYPES:
+${issueListText}
+
+### EVALUATION & CLASSIFICATION INSTRUCTIONS:
+1. VISUAL & CONTEXT EVALUATION:
+   - Determine if the image visually depicts a real physical infrastructure or facility maintenance asset/issue requiring repair.
+   - Set "isValid": true if the photo visually shows a clear physical infrastructure issue.
+   - Set "isValid": false if the photo is a selfie, portrait, clean plain wall with no damage, unrelated personal item, pet, food, screenshot, meme, poster, or text document.
+   - Compare the photo with the student description.
+   - Set "descriptionMatchesImage": true if the description aligns with the visual evidence in the photo.
+   - Set "descriptionMatchesImage": false if the description conflicts with the photo (e.g. photo shows a broken projector, but description mentions a ceiling fan).
+
+2. CATEGORY SELECTION (STRICT MATCH):
+   - Set "issueIdentified": true if the issue matches an active issue type listed above with visual confidence >= 0.75.
+   - Set "issueIdentified": false if the photo is blurry, dark, unclear, irrelevant, or does not confidently match any active issue type.
+   - Select "issueTypeCode" ONLY from the AVAILABLE ACTIVE ISSUE TYPES codes listed above.
+   - Select "departmentCode" ONLY from the department code matching that issue type in the list above.
+
+3. CONFIDENCE & SEVERITY & CONTEXT:
+   - "confidence": Float between 0.0 and 1.0.
+   - "severity": Integer from 1 to 10.
+   - "collegeContext": One of "CLASSROOM", "LAB", "CORRIDOR", "WASHROOM", "OFFICE", "CANTEEN", "LIBRARY", "CAMPUS_AREA", "OTHER".
 
 Return ONLY a valid JSON object matching this schema:
 {
   "isValid": boolean,
-  "issueType": string,
-  "department": string,
+  "issueIdentified": boolean,
+  "issueTypeCode": string,
+  "departmentCode": string,
   "confidence": number,
   "severity": number,
   "collegeContext": string,
+  "descriptionMatchesImage": boolean,
+  "needsUserConfirmation": boolean,
   "reason": string
 }`
+}
 
-// Generate secure HMAC-SHA256 signed verification token
-export const generateVerificationToken = ({ userId, imageBuffer, analysis }) => {
+// Generate secure HMAC-SHA256 signed verification token (includes description binding)
+export const generateVerificationToken = ({ userId, imageBuffer, description, analysis }) => {
   const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex')
+  const descriptionHash = crypto.createHash('sha256').update(String(description || '').trim().toLowerCase()).digest('hex')
   const payload = {
     userId: userId ? userId.toString() : '',
     imageHash,
+    descriptionHash,
     isValid: analysis.isValid === true,
     department: analysis.department,
     issueType: analysis.issueType,
@@ -97,7 +104,7 @@ export const generateVerificationToken = ({ userId, imageBuffer, analysis }) => 
 }
 
 // Verify secure HMAC-SHA256 signed verification token
-export const verifyVerificationToken = ({ token, userId, imageBuffer }) => {
+export const verifyVerificationToken = ({ token, userId, imageBuffer, description }) => {
   if (!token) return null
   try {
     const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8'))
@@ -124,10 +131,19 @@ export const verifyVerificationToken = ({ token, userId, imageBuffer }) => {
     }
 
     // Exact image hash check (prevents photo substitution!)
-    const currentHash = crypto.createHash('sha256').update(imageBuffer).digest('hex')
-    if (payload.imageHash !== currentHash) {
+    const currentImageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex')
+    if (payload.imageHash !== currentImageHash) {
       console.warn('[SECURITY ALERT] Image modified or replaced after verification!')
       return null
+    }
+
+    // Exact description hash check (if description changed after verification, token invalidates!)
+    if (payload.descriptionHash) {
+      const currentDescHash = crypto.createHash('sha256').update(String(description || '').trim().toLowerCase()).digest('hex')
+      if (payload.descriptionHash !== currentDescHash) {
+        console.warn('[SECURITY ALERT] Student description modified after verification! Invalidation triggered.')
+        return null
+      }
     }
 
     // AI validation check
@@ -180,7 +196,8 @@ export const createReport = async (req, res) => {
     const verifiedPayload = verifyVerificationToken({
       token: verificationToken,
       userId: req.userId,
-      imageBuffer
+      imageBuffer,
+      description
     })
 
     if (verifiedPayload) {
@@ -195,11 +212,12 @@ export const createReport = async (req, res) => {
       console.log('[REPORT] No valid token found, running full backend Gemini verification fallback...')
       const tGeminiStart = Date.now()
       const base64Img = imageBuffer.toString('base64')
+      const promptText = await buildDynamicGeminiPrompt(description)
 
       const result = await GoogleAi.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: [
-          { text: GEMINI_PROMPT_TEXT },
+          { text: promptText },
           { inlineData: { data: base64Img, mimeType: req.file.mimetype } }
         ],
         config: { responseMimeType: 'application/json' }
@@ -224,19 +242,37 @@ export const createReport = async (req, res) => {
         'LIBRARY', 'CAMPUS_AREA', 'OTHER'
       ]
 
-      rawIssueType = String(parsed.issueType || parsed.damageType || '').toUpperCase()
-      const rawAiDept = String(parsed.department || '').toUpperCase()
-      collegeContext = String(parsed.collegeContext || parsed.civicContext || '').toUpperCase()
-      confidence = Number(parsed.confidence)
-      const isValidFlag = parsed.isValid === true
+      const rawIssueCode = String(parsed.issueTypeCode || parsed.issueType || 'OTHER_MAINTENANCE').toUpperCase()
+      const rawAiDeptCode = String(parsed.departmentCode || parsed.department || '').toUpperCase()
+      collegeContext = String(parsed.collegeContext || parsed.civicContext || 'OTHER').toUpperCase()
+      confidence = Number(parsed.confidence) || 0
+      const isValidFlag = parsed.isValid === true && parsed.issueIdentified !== false
 
-      authoritativeDepartment = getDepartmentForIssue(rawIssueType, rawAiDept)
+      // Authoritative Department Resolution from MongoDB IssueType database record
+      let issueTypeRecord = await IssueType.findOne({ code: rawIssueCode, isActive: true }).populate('department')
+      if (!issueTypeRecord) {
+        issueTypeRecord = await IssueType.findOne({
+          $or: [
+            { code: new RegExp(`^${rawIssueCode}$`, 'i') },
+            { name: new RegExp(`^${rawIssueCode}$`, 'i') }
+          ],
+          isActive: true
+        }).populate('department')
+      }
+
+      if (issueTypeRecord) {
+        authoritativeDepartment = issueTypeRecord.department?.code || issueTypeRecord.departmentCode
+        rawIssueType = issueTypeRecord.code
+      } else {
+        authoritativeDepartment = getDepartmentForIssue(rawIssueCode, rawAiDeptCode)
+        rawIssueType = rawIssueCode
+      }
 
       let rejectionReason = null
       if (!isValidFlag) {
-        rejectionReason = 'AI visual validation marked image as invalid (no clear infrastructure issue detected).'
+        rejectionReason = parsed.reason || 'AI visual validation marked image as invalid (no clear infrastructure issue detected).'
       } else if (isNaN(confidence) || confidence < 0.75) {
-        rejectionReason = `AI confidence score (${confidence}) is below threshold of 0.75.`
+        rejectionReason = `AI confidence score (${confidence.toFixed(2)}) is below threshold of 0.75.`
       } else if (!ALLOWED_COLLEGE_CONTEXTS.includes(collegeContext)) {
         rejectionReason = `College context '${collegeContext}' is invalid or UNKNOWN.`
       }
@@ -275,8 +311,9 @@ export const createReport = async (req, res) => {
       const normReportBuilding = normalizeBuilding(reportBuilding)
       const normReportDept = normalizeDepartment(authoritativeDepartment)
 
-      const activeOfficers = await User.find({ role: 'officer' }).sort({ createdAt: 1 })
+      const activeOfficers = await User.find({ role: 'officer', isActive: { $ne: false } }).sort({ createdAt: 1 })
       const eligibleOfficers = activeOfficers.filter(o => {
+        if (o.isActive === false) return false
         if (normalizeDepartment(o.department) !== normReportDept) return false
         const oBuildings = (Array.isArray(o.assignedBuildings) && o.assignedBuildings.length > 0)
           ? o.assignedBuildings
@@ -375,15 +412,18 @@ export const verifyImage = async (req, res) => {
       return res.status(400).json({ success: false, isValid: false, message: 'Image file is required' })
     }
 
+    const description = req.body.description || ''
     const localFilePath = req.file.path
     const imageBuffer = fs.readFileSync(localFilePath)
     const base64Img = imageBuffer.toString('base64')
+
+    const promptText = await buildDynamicGeminiPrompt(description)
 
     const tGeminiStart = Date.now()
     const result = await GoogleAi.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
-        { text: GEMINI_PROMPT_TEXT },
+        { text: promptText },
         { inlineData: { data: base64Img, mimeType: req.file.mimetype } }
       ],
       config: { responseMimeType: 'application/json' }
@@ -412,19 +452,61 @@ export const verifyImage = async (req, res) => {
       'LIBRARY', 'CAMPUS_AREA', 'OTHER'
     ]
 
-    const rawIssueType = String(parsed.issueType || parsed.damageType || '').toUpperCase()
-    const rawAiDept = String(parsed.department || '').toUpperCase()
-    const collegeContext = String(parsed.collegeContext || parsed.civicContext || '').toUpperCase()
-    const confidence = Number(parsed.confidence)
-    const isValidFlag = parsed.isValid === true
+    const rawIssueCode = String(parsed.issueTypeCode || parsed.issueType || parsed.detectedType || parsed.issue || 'OTHER_MAINTENANCE').toUpperCase()
+    const rawAiDeptCode = String(parsed.departmentCode || parsed.department || parsed.departmentName || '').toUpperCase()
+    const collegeContext = String(parsed.collegeContext || parsed.civicContext || 'OTHER').toUpperCase()
+    const confidence = Number(parsed.confidence) || 0
+    const isValidFlag = parsed.isValid === true && parsed.issueIdentified !== false
 
-    const authoritativeDepartment = getDepartmentForIssue(rawIssueType, rawAiDept)
+    // Query MongoDB for authoritative IssueType and Department relationship
+    let issueTypeRecord = await IssueType.findOne({ code: rawIssueCode, isActive: true }).populate('department')
+    if (!issueTypeRecord) {
+      issueTypeRecord = await IssueType.findOne({
+        $or: [
+          { code: new RegExp(`^${rawIssueCode}$`, 'i') },
+          { name: new RegExp(`^${rawIssueCode}$`, 'i') }
+        ],
+        isActive: true
+      }).populate('department')
+    }
+
+    let authoritativeDepartmentCode = 'OTHER_MAINTENANCE_ISSUES'
+    let authoritativeDepartmentName = 'Other Maintenance Issues'
+    let authoritativeIssueTypeCode = 'OTHER_MAINTENANCE'
+    let authoritativeIssueTypeName = 'Other Maintenance'
+
+    if (issueTypeRecord) {
+      authoritativeIssueTypeCode = issueTypeRecord.code
+      authoritativeIssueTypeName = issueTypeRecord.name || issueTypeRecord.code
+      authoritativeDepartmentCode = issueTypeRecord.department?.code || issueTypeRecord.departmentCode || 'OTHER_MAINTENANCE_ISSUES'
+      
+      if (issueTypeRecord.department && typeof issueTypeRecord.department === 'object' && issueTypeRecord.department.name) {
+        authoritativeDepartmentName = issueTypeRecord.department.name
+      } else {
+        const deptDoc = await Department.findOne({ code: authoritativeDepartmentCode })
+        authoritativeDepartmentName = deptDoc?.name || DEPARTMENT_LABELS[authoritativeDepartmentCode] || authoritativeDepartmentCode
+      }
+    } else {
+      authoritativeDepartmentCode = getDepartmentForIssue(rawIssueCode, rawAiDeptCode)
+      authoritativeIssueTypeCode = rawIssueCode
+
+      const deptDoc = await Department.findOne({ code: authoritativeDepartmentCode })
+      authoritativeDepartmentName = deptDoc?.name || DEPARTMENT_LABELS[authoritativeDepartmentCode] || authoritativeDepartmentCode
+
+      authoritativeIssueTypeName = rawIssueCode
+        .split('_')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ')
+    }
+
+    const descriptionMatchesImage = parsed.descriptionMatchesImage !== false
+    const needsUserConfirmation = parsed.needsUserConfirmation === true || !descriptionMatchesImage
 
     let rejectionReason = null
     if (!isValidFlag) {
-      rejectionReason = 'Photo could not be verified as a valid campus maintenance issue.'
+      rejectionReason = parsed.reason || 'Photo could not be verified as a valid campus maintenance issue.'
     } else if (isNaN(confidence) || confidence < 0.75) {
-      rejectionReason = `AI confidence score (${confidence}) is below threshold of 0.75.`
+      rejectionReason = `AI confidence score (${confidence.toFixed(2)}) is below threshold of 0.75.`
     } else if (!ALLOWED_COLLEGE_CONTEXTS.includes(collegeContext)) {
       rejectionReason = `College context '${collegeContext}' is invalid or UNKNOWN.`
     }
@@ -434,7 +516,8 @@ export const verifyImage = async (req, res) => {
       return res.status(400).json({
         success: false,
         isValid: false,
-        message: rejectionReason
+        message: rejectionReason,
+        reason: rejectionReason
       })
     }
 
@@ -442,14 +525,14 @@ export const verifyImage = async (req, res) => {
     if (severityScore < 1) severityScore = 5
     if (severityScore > 10) severityScore = 10
 
-    // Generate signed HMAC verification token for 0-ms duplicate bypass on submission
     const verificationToken = generateVerificationToken({
       userId: req.userId,
       imageBuffer,
+      description,
       analysis: {
         isValid: true,
-        department: authoritativeDepartment,
-        issueType: rawIssueType,
+        department: authoritativeDepartmentCode,
+        issueType: authoritativeIssueTypeCode,
         confidence,
         severity: severityScore,
         collegeContext
@@ -461,13 +544,23 @@ export const verifyImage = async (req, res) => {
     return res.status(200).json({
       success: true,
       isValid: true,
-      message: 'Photo verified ✓',
+      issueIdentified: true,
+      message: descriptionMatchesImage ? 'Photo & description verified ✓' : '⚠ Mismatch detected between photo and description',
       verificationToken,
       analysis: {
-        issueType: rawIssueType,
-        department: authoritativeDepartment,
+        issueTypeCode: authoritativeIssueTypeCode,
+        issueTypeName: authoritativeIssueTypeName,
+        detectedType: authoritativeIssueTypeCode,
+        issueType: authoritativeIssueTypeName,
+        departmentCode: authoritativeDepartmentCode,
+        departmentName: authoritativeDepartmentName,
+        department: authoritativeDepartmentName,
         confidence,
-        collegeContext
+        severity: severityScore,
+        collegeContext,
+        reason: parsed.reason || 'Visual evidence matches maintenance criteria',
+        descriptionMatchesImage,
+        needsUserConfirmation
       }
     })
   } catch (error) {

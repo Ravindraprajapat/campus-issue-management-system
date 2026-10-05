@@ -50,107 +50,6 @@ const reportSchema = new mongoose.Schema(
     aiAnalysis: {
       detectedType: {
         type: String,
-        enum: [
-          // Fine-Grained & Legacy Electrical
-          "FAN_NOT_WORKING",
-          "LIGHT_NOT_WORKING",
-          "AC_NOT_WORKING",
-          "SWITCH_DAMAGED",
-          "SOCKET_DAMAGED",
-          "WIRING_ISSUE",
-          "FAN",
-          "LIGHT",
-          "AC",
-          "PLUG_SOCKET",
-          "ELECTRICAL",
-
-          // Fine-Grained & Legacy Plumbing & Water
-          "WATER_LEAKAGE",
-          "TAP_DAMAGED",
-          "PIPE_LEAKAGE",
-          "DRAIN_BLOCKAGE",
-          "FLUSH_PROBLEM",
-          "WATER_SUPPLY_ISSUE",
-          "WATER_LEAK",
-          "PLUMBING",
-
-          // Fine-Grained & Legacy Infrastructure & Furniture
-          "CHAIR_DAMAGED",
-          "TABLE_DAMAGED",
-          "CUPBOARD_DAMAGED",
-          "DOOR_DAMAGED",
-          "DOOR_LOCK_DAMAGED",
-          "SHELF_DAMAGED",
-          "WINDOW_DAMAGED",
-          "WALL_DAMAGE",
-          "FLOOR_DAMAGE",
-          "CEILING_DAMAGE",
-          "BENCH",
-          "CHAIR",
-          "DESK",
-          "DOOR",
-          "WINDOW",
-          "CLASSROOM_EQUIPMENT",
-
-          // Fine-Grained & Legacy Washroom
-          "WASHROOM_CLEANLINESS",
-          "TOILET_DAMAGE",
-          "WASH_BASIN_PROBLEM",
-          "WASHROOM_LEAKAGE",
-          "WASHROOM",
-
-          // Fine-Grained & Legacy IT & Network
-          "WIFI_NOT_WORKING",
-          "NETWORK_ISSUE",
-          "LAN_ISSUE",
-          "COMPUTER_NOT_WORKING",
-          "PROJECTOR_NOT_WORKING",
-          "CCTV_NOT_WORKING",
-          "PROJECTOR",
-          "WIFI_NETWORK",
-          "LAB_EQUIPMENT",
-
-          // Fine-Grained & Legacy Cleanliness & Waste
-          "GARBAGE_OVERFLOW",
-          "CLEANING_REQUIRED",
-          "WASTE_DISPOSAL",
-          "PEST_ISSUE",
-          "CLEANLINESS",
-          "GARBAGE",
-
-          // Fine-Grained & Legacy Safety & Security
-          "BROKEN_RAILING",
-          "FIRE_SAFETY_ISSUE",
-          "EMERGENCY_EXIT_ISSUE",
-          "DANGEROUS_WIRING",
-          "SECURITY_ISSUE",
-
-          // Fine-Grained & Legacy Lift & Mechanical
-          "LIFT_NOT_WORKING",
-          "LIFT_DOOR_ISSUE",
-          "GENERATOR_ISSUE",
-          "WATER_PUMP_ISSUE",
-          "MOTOR_ISSUE",
-
-          // Fine-Grained & Legacy Outdoor & Campus
-          "ROAD_DAMAGE",
-          "PARKING_ISSUE",
-          "STREET_LIGHT_ISSUE",
-          "DRAINAGE_ISSUE",
-          "GARDEN_ISSUE",
-          "CAMPUS_SIGNBOARD_DAMAGE",
-          "POTHOLE",
-          "ROAD_CRACK",
-          "STREETLIGHT",
-          "SPORTS_FACILITY",
-
-          // Fine-Grained & Legacy Other
-          "OTHER_MAINTENANCE",
-          "HOSTEL_ISSUE",
-          "CANTEEN_ISSUE",
-          "LIBRARY_ISSUE",
-          "OTHER"
-        ],
       },
       confidence: {
         type: Number, // 0 to 1
@@ -186,18 +85,6 @@ const reportSchema = new mongoose.Schema(
     // 🔹 Department Classification & Issue Routing
     department: {
       type: String,
-      enum: [
-        "ELECTRICAL_ISSUES",
-        "PLUMBING_WATER_ISSUES",
-        "INFRASTRUCTURE_FURNITURE_ISSUES",
-        "WASHROOM_ISSUES",
-        "IT_NETWORK_ISSUES",
-        "CLEANLINESS_WASTE_ISSUES",
-        "SAFETY_SECURITY_ISSUES",
-        "LIFT_MECHANICAL_ISSUES",
-        "OUTDOOR_CAMPUS_ISSUES",
-        "OTHER_MAINTENANCE_ISSUES"
-      ],
       default: "OTHER_MAINTENANCE_ISSUES",
       index: true
     },

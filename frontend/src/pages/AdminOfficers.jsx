@@ -5,7 +5,8 @@ import { serverUrl } from '../App'
 import Navbar from '../components/Navbar'
 import {
   Users, Search, RefreshCw, ChevronDown, UserPlus, Eye, Mail, Phone, Briefcase,
-  Calendar, ShieldCheck, FileText, List, Building, Key, Copy, Check, X
+  Calendar, ShieldCheck, FileText, List, Building, Key, Copy, Check, X, Loader2,
+  Edit2, Trash2, Power, AlertTriangle, CheckCircle2, UserCheck, UserX
 } from 'lucide-react'
 
 import { PARUL_CAMPUS_BUILDINGS } from '../config/parulCampusConfig'
@@ -55,6 +56,7 @@ const getOfficerBuildings = (officer) => {
 
 const AdminOfficers = () => {
   const [officers, setOfficers] = useState([])
+  const [activeDepartments, setActiveDepartments] = useState([])
   const [loading, setLoading] = useState(true)
 
   // Search & Filters
@@ -69,8 +71,9 @@ const AdminOfficers = () => {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [detailsError, setDetailsError] = useState('')
 
-  // Create Staff Modal State
+  // Staff Modal State (supports Create and Edit)
   const [showStaffModal, setShowStaffModal] = useState(false)
+  const [editingOfficerId, setEditingOfficerId] = useState(null)
   const [staffForm, setStaffForm] = useState({
     name: '',
     email: '',
@@ -78,28 +81,72 @@ const AdminOfficers = () => {
     employeeId: '',
     department: '',
     designation: '',
-    assignedBuildings: []
+    assignedBuildings: [],
+    isActive: true
   })
-  const [creatingStaff, setCreatingStaff] = useState(false)
-  const [createStaffError, setCreateStaffError] = useState('')
+  const [savingStaff, setSavingStaff] = useState(false)
+  const [staffFormError, setStaffFormError] = useState('')
   const [createdTempPassword, setCreatedTempPassword] = useState('')
   const [copiedCreds, setCopiedCreds] = useState(false)
+  const [deptsLoading, setDeptsLoading] = useState(false)
+  const [deptsError, setDeptsError] = useState('')
+
+  // Delete Modal State (Safe delete with dependency check)
+  const [deleteModalOfficer, setDeleteModalOfficer] = useState(null)
+  const [deletingStaff, setDeletingStaff] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [dependencyWarning, setDependencyWarning] = useState(null) // { complaintCount, officerId, officerName }
+
+  // Action toast message
+  const [toastMessage, setToastMessage] = useState(null)
+
+  const showToast = (text, type = 'success') => {
+    setToastMessage({ text, type })
+    setTimeout(() => setToastMessage(null), 4000)
+  }
+
+  const fetchActiveDepartments = useCallback(async () => {
+    setDeptsLoading(true)
+    setDeptsError('')
+    try {
+      const { data } = await axios.get(`${serverUrl}/api/admin/active-departments`, { withCredentials: true })
+      if (data.success && Array.isArray(data.departments)) {
+        setActiveDepartments(data.departments)
+      } else {
+        setDeptsError('Unable to load departments. Please try again.')
+      }
+    } catch (err) {
+      console.error('Failed to fetch active departments:', err)
+      setDeptsError('Unable to load departments. Please try again.')
+    } finally {
+      setDeptsLoading(false)
+    }
+  }, [])
 
   const fetchOfficers = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await axios.get(`${serverUrl}/api/admin/officers`, { withCredentials: true })
-      setOfficers(data.officers || [])
+      const [officersRes] = await Promise.all([
+        axios.get(`${serverUrl}/api/admin/officers`, { withCredentials: true }),
+        fetchActiveDepartments()
+      ])
+      setOfficers(officersRes.data.officers || [])
     } catch (err) {
       console.error(err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchActiveDepartments])
 
   useEffect(() => {
     fetchOfficers()
   }, [fetchOfficers])
+
+  useEffect(() => {
+    if (showStaffModal) {
+      fetchActiveDepartments()
+    }
+  }, [showStaffModal, fetchActiveDepartments])
 
   const handleOpenOfficerDetails = async (officerId) => {
     setSelectedOfficerId(officerId)
@@ -140,33 +187,103 @@ const AdminOfficers = () => {
     }))
   }
 
-  const handleCreateStaffSubmit = async (e) => {
+  const handleOpenCreateModal = () => {
+    setEditingOfficerId(null)
+    setStaffForm({
+      name: '',
+      email: '',
+      mobile: '',
+      employeeId: '',
+      department: '',
+      designation: '',
+      assignedBuildings: [],
+      isActive: true
+    })
+    setStaffFormError('')
+    setCreatedTempPassword('')
+    setCopiedCreds(false)
+    setShowStaffModal(true)
+  }
+
+  const handleOpenEditModal = (officer) => {
+    setEditingOfficerId(officer._id)
+    setStaffForm({
+      name: officer.name || '',
+      email: officer.email || '',
+      mobile: officer.mobile || '',
+      employeeId: officer.employeeId || '',
+      department: officer.department || '',
+      designation: officer.designation || '',
+      assignedBuildings: getOfficerBuildings(officer),
+      isActive: officer.isActive !== false
+    })
+    setStaffFormError('')
+    setCreatedTempPassword('')
+    setCopiedCreds(false)
+    setShowStaffModal(true)
+  }
+
+  const handleCloseStaffModal = () => {
+    setShowStaffModal(false)
+    setEditingOfficerId(null)
+    setCreatedTempPassword('')
+    setStaffFormError('')
+    setCopiedCreds(false)
+    setStaffForm({
+      name: '',
+      email: '',
+      mobile: '',
+      employeeId: '',
+      department: '',
+      designation: '',
+      assignedBuildings: [],
+      isActive: true
+    })
+  }
+
+  const handleStaffFormSubmit = async (e) => {
     e.preventDefault()
-    setCreateStaffError('')
+    setStaffFormError('')
     setCreatedTempPassword('')
 
     if (!staffForm.name || !staffForm.email || !staffForm.department || !staffForm.assignedBuildings || staffForm.assignedBuildings.length === 0) {
-      setCreateStaffError('Name, email, department, and at least one assigned building are required.')
+      setStaffFormError('Name, email, department, and at least one assigned building are required.')
       return
     }
 
-    setCreatingStaff(true)
+    setSavingStaff(true)
     try {
       const payload = {
         ...staffForm,
         assignedBuilding: staffForm.assignedBuildings[0]
       }
-      const { data } = await axios.post(
-        `${serverUrl}/api/admin/officers`,
-        payload,
-        { withCredentials: true }
-      )
-      setCreatedTempPassword(data.tempPassword)
-      fetchOfficers()
+
+      if (editingOfficerId) {
+        // Edit mode
+        await axios.put(
+          `${serverUrl}/api/admin/officers/${editingOfficerId}`,
+          payload,
+          { withCredentials: true }
+        )
+        showToast('Maintenance staff account updated successfully.', 'success')
+        setShowStaffModal(false)
+        setEditingOfficerId(null)
+        fetchOfficers()
+      } else {
+        // Create mode
+        const { data } = await axios.post(
+          `${serverUrl}/api/admin/officers`,
+          payload,
+          { withCredentials: true }
+        )
+        setCreatedTempPassword(data.tempPassword)
+        showToast('Maintenance staff account created successfully.', 'success')
+        fetchOfficers()
+      }
     } catch (err) {
-      setCreateStaffError(err?.response?.data?.message || 'Failed to create Maintenance Staff account.')
+      setStaffFormError(err?.response?.data?.message || 'Failed to save Maintenance Staff account.')
     } finally {
-      setCreatingStaff(false)
+      setSavingStaff(false)
     }
   }
 
@@ -177,20 +294,80 @@ const AdminOfficers = () => {
     setTimeout(() => setCopiedCreds(false), 3000)
   }
 
-  const handleCloseStaffModal = () => {
-    setShowStaffModal(false)
-    setCreatedTempPassword('')
-    setCreateStaffError('')
-    setCopiedCreds(false)
-    setStaffForm({
-      name: '',
-      email: '',
-      mobile: '',
-      employeeId: '',
-      department: '',
-      designation: '',
-      assignedBuildings: []
-    })
+  // Toggle active status (activate / deactivate)
+  const handleToggleOfficerStatus = async (officer) => {
+    const nextStatus = officer.isActive === false ? true : false
+    const actionLabel = nextStatus ? 'activate' : 'deactivate'
+    try {
+      await axios.patch(
+        `${serverUrl}/api/admin/officers/${officer._id}/status`,
+        { isActive: nextStatus },
+        { withCredentials: true }
+      )
+      showToast(`Staff member '${officer.name}' ${nextStatus ? 'activated' : 'deactivated'} successfully.`, 'success')
+      fetchOfficers()
+    } catch (err) {
+      showToast(err?.response?.data?.message || `Failed to ${actionLabel} staff member.`, 'error')
+    }
+  }
+
+  // Safe delete handler
+  const handleOpenDeleteModal = (officer) => {
+    setDeleteModalOfficer(officer)
+    setDeleteError('')
+    setDependencyWarning(null)
+  }
+
+  const handleCloseDeleteModal = () => {
+    setDeleteModalOfficer(null)
+    setDeleteError('')
+    setDependencyWarning(null)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModalOfficer) return
+    setDeletingStaff(true)
+    setDeleteError('')
+    setDependencyWarning(null)
+    try {
+      await axios.delete(
+        `${serverUrl}/api/admin/officers/${deleteModalOfficer._id}`,
+        { withCredentials: true }
+      )
+      showToast(`Staff member '${deleteModalOfficer.name}' permanently deleted.`, 'success')
+      handleCloseDeleteModal()
+      fetchOfficers()
+    } catch (err) {
+      const data = err?.response?.data
+      if (data?.hasDependencies) {
+        setDependencyWarning({
+          complaintCount: data.complaintCount,
+          officerId: deleteModalOfficer._id,
+          officerName: deleteModalOfficer.name,
+          message: data.message
+        })
+      } else {
+        setDeleteError(data?.message || 'Failed to delete staff member.')
+      }
+    } finally {
+      setDeletingStaff(false)
+    }
+  }
+
+  const handleDeactivateFromDeleteModal = async () => {
+    if (!dependencyWarning?.officerId) return
+    try {
+      await axios.patch(
+        `${serverUrl}/api/admin/officers/${dependencyWarning.officerId}/status`,
+        { isActive: false },
+        { withCredentials: true }
+      )
+      showToast(`Staff member '${dependencyWarning.officerName}' deactivated successfully to preserve records.`, 'success')
+      handleCloseDeleteModal()
+      fetchOfficers()
+    } catch (err) {
+      setDeleteError(err?.response?.data?.message || 'Failed to deactivate staff member.')
+    }
   }
 
   // Filtered Officers List
@@ -205,7 +382,8 @@ const AdminOfficers = () => {
       if (!matchB) return false
     }
 
-    if (officerPwdFilter === 'ACTIVE' && o.mustChangePassword) return false
+    if (officerPwdFilter === 'ACTIVE' && (o.isActive === false || o.mustChangePassword)) return false
+    if (officerPwdFilter === 'DEACTIVATED' && o.isActive !== false) return false
     if (officerPwdFilter === 'TEMP_PWD' && !o.mustChangePassword) return false
 
     if (officerSearch.trim()) {
@@ -224,8 +402,8 @@ const AdminOfficers = () => {
   // Summary Metrics
   const summaryStats = {
     totalStaff: officers.length,
-    activeStaff: officers.filter(o => !o.mustChangePassword).length,
-    tempPassword: officers.filter(o => o.mustChangePassword).length,
+    activeStaff: officers.filter(o => o.isActive !== false).length,
+    deactivatedStaff: officers.filter(o => o.isActive === false).length,
     totalAssignedComplaints: officers.reduce((sum, o) => sum + (o.stats?.total || 0), 0)
   }
 
@@ -248,7 +426,7 @@ const AdminOfficers = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setShowStaffModal(true)}
+            <button onClick={handleOpenCreateModal}
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm transition cursor-pointer">
               <UserPlus size={16} />
               + Create Staff Account
@@ -271,11 +449,11 @@ const AdminOfficers = () => {
           </div>
           <div className="bg-emerald-50 rounded-xl border border-emerald-100 shadow-sm p-5">
             <div className="text-3xl font-bold text-emerald-700">{summaryStats.activeStaff}</div>
-            <div className="text-sm text-emerald-600 font-medium mt-1">Active (Password Set)</div>
+            <div className="text-sm text-emerald-600 font-medium mt-1">Active Staff</div>
           </div>
-          <div className="bg-amber-50 rounded-xl border border-amber-100 shadow-sm p-5">
-            <div className="text-3xl font-bold text-amber-700">{summaryStats.tempPassword}</div>
-            <div className="text-sm text-amber-600 font-medium mt-1">Temporary Password</div>
+          <div className="bg-rose-50 rounded-xl border border-rose-100 shadow-sm p-5">
+            <div className="text-3xl font-bold text-rose-700">{summaryStats.deactivatedStaff}</div>
+            <div className="text-sm text-rose-600 font-medium mt-1">Deactivated Staff</div>
           </div>
           <div className="bg-sky-50 rounded-xl border border-sky-100 shadow-sm p-5">
             <div className="text-3xl font-bold text-sky-700">{summaryStats.totalAssignedComplaints}</div>
@@ -313,8 +491,8 @@ const AdminOfficers = () => {
                   className="appearance-none border border-slate-200 rounded-xl px-3 py-2 pr-8 text-xs font-medium focus:ring-2 focus:ring-emerald-400 bg-white cursor-pointer"
                 >
                   <option value="ALL">All Departments</option>
-                  {DEPARTMENTS_LIST.map(d => (
-                    <option key={d.value} value={d.value}>{d.label}</option>
+                  {activeDepartments.map(d => (
+                    <option key={d.code} value={d.code}>{d.name}</option>
                   ))}
                 </select>
                 <ChevronDown size={13} className="absolute right-2.5 top-3 text-slate-400 pointer-events-none" />
@@ -343,7 +521,8 @@ const AdminOfficers = () => {
                   className="appearance-none border border-slate-200 rounded-xl px-3 py-2 pr-8 text-xs font-medium focus:ring-2 focus:ring-emerald-400 bg-white cursor-pointer"
                 >
                   <option value="ALL">All Account Statuses</option>
-                  <option value="ACTIVE">Active (Password Set)</option>
+                  <option value="ACTIVE">Active Staff</option>
+                  <option value="DEACTIVATED">Deactivated Staff</option>
                   <option value="TEMP_PWD">Temp Password (Pending)</option>
                 </select>
                 <ChevronDown size={13} className="absolute right-2.5 top-3 text-slate-400 pointer-events-none" />
@@ -414,7 +593,7 @@ const AdminOfficers = () => {
                         {/* Department */}
                         <td className="px-5 py-4">
                           <span className="inline-block px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-                            {DEPARTMENT_LABELS[o.department] || o.department || 'General Maintenance'}
+                            {activeDepartments.find(d => d.code === o.department)?.name || DEPARTMENT_LABELS[o.department] || o.department || 'General Maintenance'}
                           </span>
                         </td>
 
@@ -442,7 +621,12 @@ const AdminOfficers = () => {
 
                         {/* Account Status */}
                         <td className="px-5 py-4">
-                          {o.mustChangePassword ? (
+                          {o.isActive === false ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                              <UserX size={12} className="text-rose-600" />
+                              <span>Deactivated</span>
+                            </span>
+                          ) : o.mustChangePassword ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                               <Key size={12} className="text-amber-600" />
                               <span>Temp Password</span>
@@ -470,13 +654,50 @@ const AdminOfficers = () => {
 
                         {/* Action */}
                         <td className="px-5 py-4 text-right">
-                          <button
-                            onClick={() => handleOpenOfficerDetails(o._id)}
-                            className="inline-flex items-center gap-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-semibold px-3 py-1.5 rounded-lg text-xs transition cursor-pointer border border-sky-200"
-                          >
-                            <Eye size={13} />
-                            <span>View Details</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* View Details */}
+                            <button
+                              onClick={() => handleOpenOfficerDetails(o._id)}
+                              title="View Staff Profile & Assigned Complaints"
+                              className="inline-flex items-center gap-1 bg-sky-50 hover:bg-sky-100 text-sky-700 font-semibold px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer border border-sky-200"
+                            >
+                              <Eye size={13} />
+                              <span className="hidden sm:inline">Details</span>
+                            </button>
+
+                            {/* Edit Staff Account */}
+                            <button
+                              onClick={() => handleOpenEditModal(o)}
+                              title="Edit Maintenance Staff Account"
+                              className="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer border border-amber-200"
+                            >
+                              <Edit2 size={13} />
+                              <span className="hidden sm:inline">Edit</span>
+                            </button>
+
+                            {/* Toggle Active / Deactivate */}
+                            <button
+                              onClick={() => handleToggleOfficerStatus(o)}
+                              title={o.isActive === false ? 'Activate Staff Account' : 'Deactivate Staff Account'}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer border ${
+                                o.isActive === false
+                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                              }`}
+                            >
+                              <Power size={13} className={o.isActive === false ? 'text-emerald-600' : 'text-slate-500'} />
+                              <span className="hidden md:inline">{o.isActive === false ? 'Activate' : 'Deactivate'}</span>
+                            </button>
+
+                            {/* Safe Delete */}
+                            <button
+                              onClick={() => handleOpenDeleteModal(o)}
+                              title="Delete Maintenance Staff Account"
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg text-xs font-semibold transition cursor-pointer border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -706,7 +927,7 @@ const AdminOfficers = () => {
         )}
       </AnimatePresence>
 
-      {/* CREATE MAINTENANCE STAFF ACCOUNT MODAL */}
+      {/* CREATE / EDIT MAINTENANCE STAFF ACCOUNT MODAL */}
       <AnimatePresence>
         {showStaffModal && (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
@@ -723,17 +944,19 @@ const AdminOfficers = () => {
                 <X size={18} />
               </button>
 
-              <div className="flex items-center gap-2 mb-1 text-emerald-600 font-semibold text-lg">
-                <UserPlus size={20} />
-                <span>Create Maintenance Staff Account</span>
+              <div className={`flex items-center gap-2 mb-1 font-semibold text-lg ${editingOfficerId ? 'text-amber-700' : 'text-emerald-600'}`}>
+                {editingOfficerId ? <Edit2 size={20} /> : <UserPlus size={20} />}
+                <span>{editingOfficerId ? 'Edit Maintenance Staff Account' : 'Create Maintenance Staff Account'}</span>
               </div>
               <p className="text-xs text-slate-500 mb-5">
-                Admin-controlled staff creation. A secure temporary password will be generated automatically.
+                {editingOfficerId
+                  ? 'Update staff member profile details, department, work locations, or active status.'
+                  : 'Admin-controlled staff creation. A secure temporary password will be generated automatically.'}
               </p>
 
-              {createStaffError && (
+              {staffFormError && (
                 <div className="bg-red-50 border border-red-200 text-red-600 text-xs p-3 rounded-xl mb-4">
-                  {createStaffError}
+                  {staffFormError}
                 </div>
               )}
 
@@ -779,7 +1002,7 @@ const AdminOfficers = () => {
                   </button>
                 </div>
               ) : (
-                <form onSubmit={handleCreateStaffSubmit} className="space-y-4">
+                <form onSubmit={handleStaffFormSubmit} className="space-y-4">
                   {/* Full Name */}
                   <div>
                     <label className="block text-slate-700 font-semibold mb-1 text-xs">Full Name *</label>
@@ -876,17 +1099,34 @@ const AdminOfficers = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1 text-xs">Department *</label>
-                      <select
-                        required
-                        value={staffForm.department}
-                        onChange={e => setStaffForm({ ...staffForm, department: e.target.value })}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white cursor-pointer"
-                      >
-                        <option value="">-- Select Department --</option>
-                        {DEPARTMENTS_LIST.map(d => (
-                          <option key={d.value} value={d.value}>{d.label}</option>
-                        ))}
-                      </select>
+                      {deptsLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-sky-600 bg-sky-50 border border-sky-200 p-2.5 rounded-xl font-medium">
+                          <Loader2 size={13} className="animate-spin text-sky-500 shrink-0" />
+                          <span>Loading departments...</span>
+                        </div>
+                      ) : deptsError ? (
+                        <div className="text-xs text-red-600 bg-red-50 border border-red-200 p-2.5 rounded-xl flex items-center justify-between font-medium">
+                          <span>{deptsError}</span>
+                          <button type="button" onClick={fetchActiveDepartments} className="text-sky-600 hover:underline font-bold text-[10px] cursor-pointer ml-1">Retry</button>
+                        </div>
+                      ) : activeDepartments.length === 0 ? (
+                        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-xl flex items-center justify-between font-medium">
+                          <span>No active departments available.</span>
+                          <button type="button" onClick={fetchActiveDepartments} className="text-sky-600 hover:underline font-bold text-[10px] cursor-pointer ml-1">Retry</button>
+                        </div>
+                      ) : (
+                        <select
+                          required
+                          value={staffForm.department}
+                          onChange={e => setStaffForm({ ...staffForm, department: e.target.value })}
+                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white cursor-pointer"
+                        >
+                          <option value="">-- Select Department --</option>
+                          {activeDepartments.map(d => (
+                            <option key={d.code} value={d.code}>{d.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1 text-xs">Designation</label>
@@ -900,6 +1140,24 @@ const AdminOfficers = () => {
                     </div>
                   </div>
 
+                  {/* Account Status in Edit Mode */}
+                  {editingOfficerId && (
+                    <div className="pt-1">
+                      <label className="block text-slate-700 font-semibold mb-1 text-xs">Account Status</label>
+                      <select
+                        value={staffForm.isActive ? 'true' : 'false'}
+                        onChange={e => setStaffForm({ ...staffForm, isActive: e.target.value === 'true' })}
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white cursor-pointer"
+                      >
+                        <option value="true">Active (Eligible for automatic complaint assignments)</option>
+                        <option value="false">Deactivated (Excluded from future complaint assignments)</option>
+                      </select>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Deactivated staff retain full complaint history and audit records, but are excluded from automatic assignments.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex gap-3 pt-2">
                     <button
                       type="button"
@@ -910,16 +1168,147 @@ const AdminOfficers = () => {
                     </button>
                     <button
                       type="submit"
-                      disabled={creatingStaff}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs transition cursor-pointer shadow-md"
+                      disabled={savingStaff}
+                      className={`flex-1 font-bold py-2.5 rounded-xl text-xs transition cursor-pointer shadow-md text-white disabled:opacity-50 ${
+                        editingOfficerId
+                          ? 'bg-amber-600 hover:bg-amber-700'
+                          : 'bg-emerald-600 hover:bg-emerald-700'
+                      }`}
                     >
-                      {creatingStaff ? 'Creating Account...' : 'Create Account'}
+                      {savingStaff
+                        ? (editingOfficerId ? 'Saving Changes...' : 'Creating Account...')
+                        : (editingOfficerId ? 'Save Changes' : 'Create Account')}
                     </button>
                   </div>
                 </form>
               )}
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* SAFE DELETE CONFIRMATION & DEPENDENCY WARNING MODAL */}
+      <AnimatePresence>
+        {deleteModalOfficer && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100 relative"
+            >
+              <button
+                onClick={handleCloseDeleteModal}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+
+              {dependencyWarning ? (
+                // DEPENDENCY WARNING (CANNOT DELETE - HISTORICAL RECORDS PRESERVATION)
+                <div className="space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                    <AlertTriangle size={24} />
+                  </div>
+
+                  <div className="text-center">
+                    <h3 className="font-bold text-slate-900 text-base">Cannot Delete Staff Member</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      <strong>{dependencyWarning.officerName}</strong> has{' '}
+                      <span className="text-rose-600 font-bold">{dependencyWarning.complaintCount} assigned complaint(s)</span>.
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs p-3.5 rounded-xl leading-relaxed">
+                    <p className="font-semibold mb-1">Preserve Historical Audit Trail</p>
+                    <p>
+                      Permanent deletion is blocked because deleting this account would break existing complaint history and resolution records.
+                    </p>
+                    <p className="mt-2 text-amber-800">
+                      Instead, <strong>Deactivate</strong> this account. Deactivated staff retain existing history but are immediately excluded from future automatic assignments.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleDeactivateFromDeleteModal}
+                      className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-xs transition cursor-pointer shadow-sm"
+                    >
+                      Deactivate Account Instead
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCloseDeleteModal}
+                      className="w-full border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
+                    >
+                      Cancel & Keep Active
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // CONFIRM PERMANENT DELETE DIALOG
+                <div className="space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                    <Trash2 size={24} />
+                  </div>
+
+                  <div className="text-center">
+                    <h3 className="font-bold text-slate-900 text-base">Delete Staff Member</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Are you sure you want to permanently delete <strong>{deleteModalOfficer.name}</strong> ({deleteModalOfficer.email})?
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      If this staff member has assigned complaints, the system will prevent deletion and suggest deactivation.
+                    </p>
+                  </div>
+
+                  {deleteError && (
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 rounded-xl">
+                      {deleteError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleCloseDeleteModal}
+                      className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deletingStaff}
+                      onClick={handleConfirmDelete}
+                      className="flex-1 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs transition cursor-pointer shadow-md"
+                    >
+                      {deletingStaff ? 'Checking & Deleting...' : 'Confirm Delete'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* FLOATING TOAST NOTIFICATION */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-24 right-8 z-[2000] px-4 py-3 rounded-xl shadow-lg border text-xs font-semibold flex items-center gap-2 ${
+              toastMessage.type === 'error'
+                ? 'bg-rose-50 text-rose-800 border-rose-200'
+                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }`}
+          >
+            {toastMessage.type === 'error' ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+            <span>{toastMessage.text}</span>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

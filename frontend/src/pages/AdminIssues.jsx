@@ -6,10 +6,13 @@ import Navbar from '../components/Navbar'
 import {
   Filter, RefreshCw, CheckCircle, Clock, AlertCircle, Building,
   ChevronDown, ChevronUp, UserCheck, Trash2, MapPin, X, UserPlus, Copy, Check, Key,
-  Eye, Mail, Phone, Briefcase, Calendar, ShieldCheck, FileText, List, Zap, Search, Users
+  Eye, Mail, Phone, Briefcase, Calendar, ShieldCheck, FileText, List, Zap, Search, Users, Loader2
 } from 'lucide-react'
 
 import { PARUL_CAMPUS_BUILDINGS } from '../config/parulCampusConfig'
+
+import AdminDepartments from '../components/AdminDepartments'
+import AdminIssueTypes from '../components/AdminIssueTypes'
 
 const CAMPUS_BUILDINGS = PARUL_CAMPUS_BUILDINGS
 
@@ -29,7 +32,7 @@ const PRIORITY_COLORS = {
   LOW: 'bg-gray-100 text-gray-600'
 }
 
-const DEPARTMENTS_LIST = [
+const DEFAULT_DEPARTMENTS_LIST = [
   { value: 'ELECTRICAL_ISSUES', label: 'Electrical Issues' },
   { value: 'PLUMBING_WATER_ISSUES', label: 'Plumbing & Water Issues' },
   { value: 'INFRASTRUCTURE_FURNITURE_ISSUES', label: 'Infrastructure & Furniture Issues' },
@@ -42,9 +45,19 @@ const DEPARTMENTS_LIST = [
   { value: 'OTHER_MAINTENANCE_ISSUES', label: 'Other Maintenance Issues' }
 ]
 
-const DEPARTMENT_LABELS = Object.fromEntries(DEPARTMENTS_LIST.map(d => [d.value, d.label]))
+const DEPARTMENTS_LIST = DEFAULT_DEPARTMENTS_LIST
 
-const AdminIssues = () => {
+const AdminIssues = ({ defaultTab = 'issues' }) => {
+  const [activeTab, setActiveTab] = useState(defaultTab) // 'issues' | 'departments' | 'issuetypes'
+
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab)
+    }
+  }, [defaultTab])
+  const [departmentsList, setDepartmentsList] = useState(DEFAULT_DEPARTMENTS_LIST)
+  const DEPARTMENT_LABELS = Object.fromEntries(departmentsList.map(d => [d.value, d.label]))
+
   const [reports, setReports] = useState([])
   const [buildings, setBuildings] = useState([]) // building summary
   const [officers, setOfficers] = useState([])
@@ -94,6 +107,48 @@ const AdminIssues = () => {
   const [createStaffError, setCreateStaffError] = useState('')
   const [createdTempPassword, setCreatedTempPassword] = useState('')
   const [copiedCreds, setCopiedCreds] = useState(false)
+  const [deptsLoading, setDeptsLoading] = useState(false)
+  const [deptsError, setDeptsError] = useState('')
+
+  const fetchActiveDepartments = useCallback(async () => {
+    setDeptsLoading(true)
+    setDeptsError('')
+    try {
+      const { data } = await axios.get(`${serverUrl}/api/admin/active-departments`, { withCredentials: true })
+      if (data.success && Array.isArray(data.departments)) {
+        setDepartmentsList(data.departments.map(d => ({ value: d.code, label: d.name })))
+      } else {
+        setDeptsError('Unable to load departments. Please try again.')
+      }
+    } catch (err) {
+      console.error('Failed to fetch active departments:', err)
+      setDeptsError('Unable to load departments. Please try again.')
+    } finally {
+      setDeptsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (showStaffModal) {
+      fetchActiveDepartments()
+    }
+  }, [showStaffModal, fetchActiveDepartments])
+
+  const handleCreateStaffForProblem = (report) => {
+    const targetDept = report?.department || ''
+    const targetBldg = report?.location?.building || report?.location?.ward || ''
+
+    setStaffForm({
+      name: '',
+      email: '',
+      mobile: '',
+      employeeId: '',
+      department: targetDept,
+      designation: '',
+      assignedBuildings: targetBldg ? [targetBldg] : []
+    })
+    setShowStaffModal(true)
+  }
 
   // filtersActive = any filter is set → show complaints table
   const filtersActive = filters.status !== 'ALL' || filters.issue !== 'ALL' || filters.building !== 'ALL' || filters.department !== 'ALL'
@@ -101,14 +156,18 @@ const AdminIssues = () => {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [reportsRes, buildingRes, officersRes] = await Promise.all([
+      const [reportsRes, buildingRes, officersRes, deptsRes] = await Promise.all([
         axios.get(`${serverUrl}/api/admin/reports`, { withCredentials: true }),
         axios.get(`${serverUrl}/api/admin/building-summary`, { withCredentials: true }),
-        axios.get(`${serverUrl}/api/admin/officers`, { withCredentials: true })
+        axios.get(`${serverUrl}/api/admin/officers`, { withCredentials: true }),
+        axios.get(`${serverUrl}/api/admin/active-departments`, { withCredentials: true }).catch(() => null)
       ])
       setReports(reportsRes.data.reports || [])
       setBuildings(buildingRes.data.buildings || buildingRes.data.wards || [])
       setOfficers(officersRes.data.officers || [])
+      if (deptsRes?.data?.departments && deptsRes.data.departments.length > 0) {
+        setDepartmentsList(deptsRes.data.departments.map(d => ({ value: d.code, label: d.name })))
+      }
     } catch (err) {
       console.error(err)
     } finally {
@@ -386,11 +445,51 @@ const AdminIssues = () => {
           </div>
         </motion.div>
 
-        {cleanMsg && (
-          <div className="mb-4 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2 rounded-lg">
-            {cleanMsg}
-          </div>
-        )}
+        {/* TAB NAVIGATION */}
+        <div className="flex border-b border-slate-200 mb-6 gap-2">
+          <button
+            onClick={() => setActiveTab('issues')}
+            className={`px-4 py-2.5 font-bold text-xs transition cursor-pointer flex items-center gap-2 border-b-2 ${
+              activeTab === 'issues'
+                ? 'border-indigo-600 text-indigo-600 bg-indigo-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Building size={16} /> Issue Complaints & Building Assignments
+          </button>
+          <button
+            onClick={() => setActiveTab('departments')}
+            className={`px-4 py-2.5 font-bold text-xs transition cursor-pointer flex items-center gap-2 border-b-2 ${
+              activeTab === 'departments'
+                ? 'border-indigo-600 text-indigo-600 bg-indigo-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Building size={16} /> Department Management
+          </button>
+          <button
+            onClick={() => setActiveTab('issuetypes')}
+            className={`px-4 py-2.5 font-bold text-xs transition cursor-pointer flex items-center gap-2 border-b-2 ${
+              activeTab === 'issuetypes'
+                ? 'border-indigo-600 text-indigo-600 bg-indigo-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Zap size={16} /> Issue Types
+          </button>
+        </div>
+
+        {activeTab === 'departments' ? (
+          <AdminDepartments />
+        ) : activeTab === 'issuetypes' ? (
+          <AdminIssueTypes />
+        ) : (
+          <>
+            {cleanMsg && (
+              <div className="mb-4 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2 rounded-lg">
+                {cleanMsg}
+              </div>
+            )}
 
         {/* 2. SUMMARY CARDS */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
@@ -445,7 +544,7 @@ const AdminIssues = () => {
                   className="appearance-none border border-slate-200 rounded-xl px-3 py-2 pr-8 text-xs font-medium focus:ring-2 focus:ring-sky-400 bg-white cursor-pointer"
                 >
                   <option value="ALL">All Departments</option>
-                  {DEPARTMENTS_LIST.map(d => (
+                  {departmentsList.map(d => (
                     <option key={d.value} value={d.value}>{d.label}</option>
                   ))}
                 </select>
@@ -736,7 +835,19 @@ const AdminIssues = () => {
                                                     <span>{r.assignedTo.name || 'Assigned Staff'}</span>
                                                   </div>
                                                 ) : (
-                                                  <span className="text-amber-600 font-medium italic">⚠ Unassigned</span>
+                                                  <div className="space-y-1">
+                                                    <span className="text-amber-600 font-bold text-[11px] flex items-center gap-1">
+                                                      <AlertCircle size={12} /> ⚠ Unassigned
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleCreateStaffForProblem(r)}
+                                                      className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md transition cursor-pointer border border-amber-300"
+                                                      title="Create Maintenance Staff for this issue"
+                                                    >
+                                                      <UserPlus size={10} /> + Create Staff for This Problem
+                                                    </button>
+                                                  </div>
                                                 )}
                                               </td>
                                               <td className="px-4 py-3">
@@ -912,6 +1023,8 @@ const AdminIssues = () => {
             </motion.div>
           )}
         </AnimatePresence>
+        </>
+        )}
       </div>
 
       {/* AUTO-ASSIGN UNASSIGNED ISSUES MODAL */}
@@ -1442,17 +1555,34 @@ const AdminIssues = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1 text-xs">Department *</label>
-                      <select
-                        required
-                        value={staffForm.department}
-                        onChange={e => setStaffForm({ ...staffForm, department: e.target.value })}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white cursor-pointer"
-                      >
-                        <option value="">-- Select Department --</option>
-                        {DEPARTMENTS_LIST.map(d => (
-                          <option key={d.value} value={d.value}>{d.label}</option>
-                        ))}
-                      </select>
+                      {deptsLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-sky-600 bg-sky-50 border border-sky-200 p-2 rounded-xl">
+                          <Loader2 size={13} className="animate-spin text-sky-500" />
+                          <span>Loading departments...</span>
+                        </div>
+                      ) : deptsError ? (
+                        <div className="text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded-xl flex items-center justify-between">
+                          <span>{deptsError}</span>
+                          <button type="button" onClick={fetchActiveDepartments} className="text-sky-600 hover:underline font-bold text-[10px]">Retry</button>
+                        </div>
+                      ) : departmentsList.length === 0 ? (
+                        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-xl flex items-center justify-between font-medium">
+                          <span>No active departments available.</span>
+                          <button type="button" onClick={fetchActiveDepartments} className="text-sky-600 hover:underline font-bold text-[10px] cursor-pointer ml-1">Retry</button>
+                        </div>
+                      ) : (
+                        <select
+                          required
+                          value={staffForm.department}
+                          onChange={e => setStaffForm({ ...staffForm, department: e.target.value })}
+                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white cursor-pointer"
+                        >
+                          <option value="">-- Select Department --</option>
+                          {departmentsList.map(d => (
+                            <option key={d.value} value={d.value}>{d.label}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1 text-xs">Designation</label>

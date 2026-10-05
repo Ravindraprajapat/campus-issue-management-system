@@ -72,7 +72,7 @@ axios.interceptors.response.use(
   }
 )
 
-export const serverUrl = 'https://campus-issue-management-system-g1mh.onrender.com'
+export const serverUrl = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://campus-issue-management-system-g1mh.onrender.com')
 
 function App () {
   useGetCurrentUser()
@@ -93,7 +93,23 @@ function App () {
         path='/admin/issues'
         element={
           <ProtectedRoute requiredRole="admin">
-            <AdminIssues />
+            <AdminIssues defaultTab="issues" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path='/admin/departments'
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <AdminIssues defaultTab="departments" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path='/admin/issue-types'
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <AdminIssues defaultTab="issuetypes" />
           </ProtectedRoute>
         }
       />

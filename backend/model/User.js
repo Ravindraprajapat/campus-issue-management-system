@@ -42,6 +42,10 @@ const UserSchema = new mongoose.Schema(
     employeeId: String,
     department: String,
     designation: String,
+    isActive: {
+      type: Boolean,
+      default: true
+    },
     mustChangePassword: {
       type: Boolean,
       default: false

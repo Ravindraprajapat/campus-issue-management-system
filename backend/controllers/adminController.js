@@ -1,5 +1,6 @@
 import Report from '../model/Report.js'
 import User from '../model/User.js'
+import Department from '../model/Department.js'
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { sendComplaintResolvedNotification } from '../utils/notificationService.js'
@@ -180,6 +181,13 @@ export const assignOfficerToReport = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid maintenance staff officer' })
       }
 
+      if (officer.isActive === false) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot assign complaint to an inactive or deactivated maintenance staff member.'
+        })
+      }
+
       // 1. Department match validation
       if (normalizeDepartment(existingReport.department) !== normalizeDepartment(officer.department)) {
         return res.status(400).json({
@@ -300,6 +308,13 @@ export const updateReportStatus = async (req, res) => {
           return res.status(400).json({ success: false, message: 'Invalid maintenance staff officer' })
         }
 
+        if (officer.isActive === false) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot assign complaint to an inactive or deactivated maintenance staff member.'
+          })
+        }
+
         // 1. Department match validation
         if (normalizeDepartment(existingReport.department) !== normalizeDepartment(officer.department)) {
           return res.status(400).json({
@@ -383,6 +398,7 @@ export const getOfficers = async (req, res) => {
       const bldgs = getOfficerBuildings(o)
       return {
         ...o.toObject(),
+        isActive: o.isActive !== false,
         assignedBuildings: bldgs,
         stats: st
       }
@@ -404,6 +420,7 @@ export const getOfficerDetails = async (req, res) => {
     }
 
     const officerObj = officer.toObject()
+    officerObj.isActive = officer.isActive !== false
     officerObj.assignedBuildings = getOfficerBuildings(officer)
 
     const assignedComplaints = await Report.find({ assignedTo: officer._id })
@@ -458,8 +475,9 @@ export const createOfficer = async (req, res) => {
     }
 
     const normDept = String(department).trim()
-    if (!DEPARTMENTS.includes(normDept)) {
-      return res.status(400).json({ success: false, message: 'Invalid department specified. Please select a valid campus department.' })
+    const dbDept = await Department.findOne({ code: normDept, isActive: true })
+    if (!dbDept && !DEPARTMENTS.includes(normDept)) {
+      return res.status(400).json({ success: false, message: 'Invalid department specified. Please select a valid active campus department.' })
     }
 
     const existingEmail = await User.findOne({ email })
@@ -495,28 +513,47 @@ export const createOfficer = async (req, res) => {
       mustChangePassword: true
     })
 
-    // 🔹 AUTOMATIC OFFICER ASSIGNMENT TRIGGER
-    // Automatically assign existing unassigned reports matching officer.department AND any of officer.assignedBuildings
-    const unassignedReports = await Report.find({
-      $or: [{ assignedTo: { $exists: false } }, { assignedTo: null }]
-    })
-
+    // 🔹 AUTOMATIC OFFICER ASSIGNMENT TRIGGER (RECHECK UNASSIGNED COMPLAINTS)
+    // Automatically assign existing UNASSIGNED reports matching officer.department AND any of officer.assignedBuildings
     let autoAssignedCount = 0
-    const normBuildings = buildingsArray.map(b => normalizeBuilding(b))
+    try {
+      const unassignedReports = await Report.find({
+        $or: [{ assignedTo: { $exists: false } }, { assignedTo: null }]
+      })
 
-    for (const report of unassignedReports) {
-      const rDeptNorm = normalizeDepartment(report.department)
-      const rBldgNorm = normalizeBuilding(report.location?.building || report.location?.ward)
+      const allOfficers = await User.find({ role: 'officer', isActive: { $ne: false } }).sort({ createdAt: 1 })
 
-      if (rDeptNorm === normalizeDepartment(normDept) && normBuildings.includes(rBldgNorm)) {
-        report.assignedTo = officer._id
-        await report.save()
-        autoAssignedCount++
+      for (const report of unassignedReports) {
+        const rDeptNorm = normalizeDepartment(report.department)
+        const rBldgNorm = normalizeBuilding(report.location?.building || report.location?.ward)
+
+        const eligibleOfficers = allOfficers.filter(o => {
+          if (o.isActive === false) return false
+          if (normalizeDepartment(o.department) !== rDeptNorm) return false
+          const oBuildings = getOfficerBuildings(o).map(b => normalizeBuilding(b))
+          return oBuildings.includes(rBldgNorm)
+        })
+
+        if (eligibleOfficers.length > 0) {
+          const workloads = await Promise.all(eligibleOfficers.map(async (off) => {
+            const activeCount = await Report.countDocuments({
+              assignedTo: off._id,
+              status: { $in: ['PENDING', 'IN_PROGRESS'] }
+            })
+            return { officer: off, activeCount }
+          }))
+          workloads.sort((a, b) => a.activeCount - b.activeCount)
+          report.assignedTo = workloads[0].officer._id
+          await report.save()
+          autoAssignedCount++
+        }
       }
-    }
 
-    if (autoAssignedCount > 0) {
-      console.log(`[Auto Officer Assignment] Automatically assigned ${autoAssignedCount} existing unassigned report(s) to newly created officer '${name}'.`)
+      if (autoAssignedCount > 0) {
+        console.log(`[Auto Officer Assignment] Automatically assigned ${autoAssignedCount} existing unassigned report(s) matching department '${normDept}' & buildings [${buildingsArray.join(', ')}].`)
+      }
+    } catch (recheckErr) {
+      console.error('Non-blocking error during unassigned report re-check:', recheckErr.message)
     }
 
     const userObj = officer.toObject()
@@ -546,7 +583,7 @@ export const previewAutoAssignUnassigned = async (req, res) => {
       ]
     }).populate('reportedBy', 'name email')
 
-    const officers = await User.find({ role: 'officer' }).sort({ createdAt: 1 })
+    const officers = await User.find({ role: 'officer', isActive: { $ne: false } }).sort({ createdAt: 1 })
 
     const eligibleAssignments = []
     const remainingUnassigned = []
@@ -568,7 +605,7 @@ export const previewAutoAssignUnassigned = async (req, res) => {
 
       // Filter eligible officers (department matches AND reportBuilding is in officer.assignedBuildings)
       const eligibleOfficers = officers.filter(o => {
-        if (o.role !== 'officer') return false
+        if (o.role !== 'officer' || o.isActive === false) return false
         if (normalizeDepartment(o.department) !== normalizeDepartment(reportDept)) return false
         const oBuildings = getOfficerBuildings(o)
         return oBuildings.some(b => normalizeBuilding(b) === normalizeBuilding(reportBuilding))
@@ -634,7 +671,7 @@ export const autoAssignUnassignedReports = async (req, res) => {
       ]
     })
 
-    const officers = await User.find({ role: 'officer' }).sort({ createdAt: 1 })
+    const officers = await User.find({ role: 'officer', isActive: { $ne: false } }).sort({ createdAt: 1 })
 
     let assignedCount = 0
     const assignedLog = []
@@ -656,7 +693,7 @@ export const autoAssignUnassignedReports = async (req, res) => {
       }
 
       const eligibleOfficers = officers.filter(o => {
-        if (o.role !== 'officer') return false
+        if (o.role !== 'officer' || o.isActive === false) return false
         if (normalizeDepartment(o.department) !== normalizeDepartment(reportDept)) return false
         const oBuildings = getOfficerBuildings(o)
         return oBuildings.some(b => normalizeBuilding(b) === normalizeBuilding(reportBuilding))
@@ -706,3 +743,160 @@ export const autoAssignUnassignedReports = async (req, res) => {
     res.status(500).json({ success: false, message: error.message })
   }
 }
+
+// Admin: update existing Maintenance Staff account
+export const updateOfficer = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { name, email, mobile, employeeId, department, designation, assignedBuilding, assignedBuildings: reqAssignedBuildings, isActive } = req.body
+
+    const officer = await User.findOne({ _id: id, role: 'officer' })
+    if (!officer) {
+      return res.status(404).json({ success: false, message: 'Maintenance staff member not found.' })
+    }
+
+    if (name !== undefined) {
+      if (!name.trim()) {
+        return res.status(400).json({ success: false, message: 'Full name cannot be empty.' })
+      }
+      officer.name = name.trim()
+    }
+
+    if (email !== undefined) {
+      const normEmail = email.trim().toLowerCase()
+      if (!normEmail) {
+        return res.status(400).json({ success: false, message: 'Email cannot be empty.' })
+      }
+      const existingEmail = await User.findOne({ email: normEmail, _id: { $ne: id } })
+      if (existingEmail) {
+        return res.status(400).json({ success: false, message: 'Another user with this email already exists.' })
+      }
+      officer.email = normEmail
+    }
+
+    if (employeeId !== undefined) {
+      const normEmpId = String(employeeId || '').trim()
+      if (normEmpId) {
+        const existingEmp = await User.findOne({ employeeId: normEmpId, _id: { $ne: id } })
+        if (existingEmp) {
+          return res.status(400).json({ success: false, message: 'Another staff member with this Employee ID already exists.' })
+        }
+      }
+      officer.employeeId = normEmpId
+    }
+
+    if (mobile !== undefined) {
+      officer.mobile = String(mobile || '').trim()
+    }
+
+    if (designation !== undefined) {
+      officer.designation = String(designation || '').trim()
+    }
+
+    if (department !== undefined) {
+      const normDept = String(department).trim()
+      if (!normDept) {
+        return res.status(400).json({ success: false, message: 'Department cannot be empty.' })
+      }
+      const dbDept = await Department.findOne({ code: normDept, isActive: true })
+      if (!dbDept && !DEPARTMENTS.includes(normDept)) {
+        return res.status(400).json({ success: false, message: 'Invalid department specified. Please select a valid active campus department.' })
+      }
+      officer.department = normDept
+    }
+
+    if (reqAssignedBuildings !== undefined || assignedBuilding !== undefined) {
+      let buildingsArray = Array.isArray(reqAssignedBuildings) && reqAssignedBuildings.length > 0
+        ? reqAssignedBuildings
+        : (assignedBuilding ? [assignedBuilding] : [])
+
+      buildingsArray = [...new Set(buildingsArray.map(b => String(b || '').trim()).filter(Boolean))]
+      if (buildingsArray.length === 0) {
+        return res.status(400).json({ success: false, message: 'At least one assigned building / work location is required.' })
+      }
+      officer.assignedBuildings = buildingsArray
+      officer.assignedBuilding = buildingsArray[0]
+      officer.assignedWard = buildingsArray[0]
+    }
+
+    if (isActive !== undefined) {
+      officer.isActive = Boolean(isActive)
+    }
+
+    await officer.save()
+
+    const userObj = officer.toObject()
+    delete userObj.password
+    userObj.isActive = officer.isActive !== false
+    userObj.assignedBuildings = getOfficerBuildings(officer)
+
+    return res.status(200).json({
+      success: true,
+      message: 'Maintenance Staff account updated successfully.',
+      officer: userObj
+    })
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message })
+  }
+}
+
+// Admin: toggle active status of Maintenance Staff account (activate / deactivate)
+export const toggleOfficerStatus = async (req, res) => {
+  try {
+    const { id } = req.params
+    const officer = await User.findOne({ _id: id, role: 'officer' })
+    if (!officer) {
+      return res.status(404).json({ success: false, message: 'Maintenance staff member not found.' })
+    }
+
+    if (req.body.isActive !== undefined) {
+      officer.isActive = Boolean(req.body.isActive)
+    } else {
+      officer.isActive = officer.isActive === false ? true : false
+    }
+
+    await officer.save()
+
+    return res.status(200).json({
+      success: true,
+      message: `Staff account ${officer.isActive ? 'activated' : 'deactivated'} successfully.`,
+      isActive: officer.isActive,
+      officerId: officer._id
+    })
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message })
+  }
+}
+
+// Admin: Safe delete Maintenance Staff account
+export const deleteOfficer = async (req, res) => {
+  try {
+    const { id } = req.params
+    const officer = await User.findOne({ _id: id, role: 'officer' })
+    if (!officer) {
+      return res.status(404).json({ success: false, message: 'Maintenance staff member not found.' })
+    }
+
+    // Safety dependency check: verify if staff is referenced in any Report records
+    const complaintCount = await Report.countDocuments({ assignedTo: officer._id })
+    if (complaintCount > 0) {
+      return res.status(400).json({
+        success: false,
+        hasDependencies: true,
+        complaintCount,
+        message: `Cannot delete staff member '${officer.name}' because they are assigned to ${complaintCount} complaint(s). Deactivate the account instead to preserve historical records and audit trail.`
+      })
+    }
+
+    // No dependencies: safe to permanently delete
+    await User.findByIdAndDelete(officer._id)
+
+    return res.status(200).json({
+      success: true,
+      message: `Maintenance staff member '${officer.name}' has been permanently deleted.`
+    })
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message })
+  }
+}
+

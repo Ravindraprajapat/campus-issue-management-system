@@ -9,7 +9,9 @@ import {
   Menu,
   X,
   LogOut,
-  Users
+  Users,
+  Building,
+  Layers
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
@@ -34,8 +36,10 @@ const Navbar = () => {
   if (role === "admin") {
     navItems = [
       { name: "Dashboard", icon: FileText, path: "/admin/issues" },
-      { name: "Campus Map", icon: MapPin, path: "/admin/map" },
-      { name: "Maintenance Staff", icon: Users, path: "/admin/officers" }
+      { name: "Departments", icon: Building, path: "/admin/departments" },
+      { name: "Issue Types", icon: Layers, path: "/admin/issue-types" },
+      { name: "Maintenance Staff", icon: Users, path: "/admin/officers" },
+      { name: "Campus Map", icon: MapPin, path: "/admin/map" }
     ];
   } else if (role === "officer") {
     navItems = [
@@ -54,7 +58,7 @@ const Navbar = () => {
 
   /* ================= PROTECTED PATHS ================= */
 
-  const protectedPaths = ["/report", "/city-map", "/track-status", "/admin/issues", "/admin/officers", "/admin/map", "/officer/map", "/officer/issues"];
+  const protectedPaths = ["/report", "/city-map", "/track-status", "/admin/issues", "/admin/departments", "/admin/issue-types", "/admin/officers", "/admin/map", "/officer/map", "/officer/issues"];
 
   const handleNavigation = (path) => {
     if (!userData && protectedPaths.includes(path)) {
