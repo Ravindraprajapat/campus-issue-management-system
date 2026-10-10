@@ -54,6 +54,10 @@ const reportSchema = new mongoose.Schema(
       confidence: {
         type: Number, // 0 to 1
       },
+      reason: {
+        type: String,
+        default: "",
+      },
     },
 
     // 🔹 Final Computed Severity Score (1–10)
@@ -72,7 +76,7 @@ const reportSchema = new mongoose.Schema(
     // 🔹 Complaint lifecycle
     status: {
       type: String,
-      enum: ["PENDING", "IN_PROGRESS", "RESOLVED"],
+      enum: ["PENDING", "IN_PROGRESS", "RESOLVED", "PENDING_CLASSIFICATION"],
       default: "PENDING",
     },
 
@@ -85,10 +89,14 @@ const reportSchema = new mongoose.Schema(
     // 🔹 Department Classification & Issue Routing
     department: {
       type: String,
-      default: "OTHER_MAINTENANCE_ISSUES",
+      default: null,
       index: true
     },
     issueType: {
+      type: String,
+      default: ""
+    },
+    aiDetectedIssue: {
       type: String,
       default: ""
     },

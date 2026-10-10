@@ -1,6 +1,7 @@
 import Report from '../model/Report.js'
 import User from '../model/User.js'
 import Department from '../model/Department.js'
+import IssueType from '../model/IssueType.js'
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { sendComplaintResolvedNotification } from '../utils/notificationService.js'
@@ -47,9 +48,13 @@ export const getWardSummary = async (req, res) => {
         ? r.location.building.trim()
         : 'Building Not Specified'
 
-      if (!buildingMap[b]) buildingMap[b] = { total: 0, pending: 0, inProgress: 0, resolved: 0 }
+      if (!buildingMap[b]) buildingMap[b] = { total: 0, pending: 0, inProgress: 0, resolved: 0, pendingClassification: 0 }
       buildingMap[b].total++
       if (r.status === 'PENDING') buildingMap[b].pending++
+      else if (r.status === 'PENDING_CLASSIFICATION') {
+        buildingMap[b].pending++
+        buildingMap[b].pendingClassification++
+      }
       else if (r.status === 'IN_PROGRESS') buildingMap[b].inProgress++
       else if (r.status === 'RESOLVED') buildingMap[b].resolved++
     })
@@ -577,6 +582,7 @@ export const createOfficer = async (req, res) => {
 export const previewAutoAssignUnassigned = async (req, res) => {
   try {
     const unassignedReports = await Report.find({
+      status: { $ne: 'PENDING_CLASSIFICATION' },
       $or: [
         { assignedTo: { $exists: false } },
         { assignedTo: null }
@@ -665,6 +671,7 @@ export const previewAutoAssignUnassigned = async (req, res) => {
 export const autoAssignUnassignedReports = async (req, res) => {
   try {
     const unassignedReports = await Report.find({
+      status: { $ne: 'PENDING_CLASSIFICATION' },
       $or: [
         { assignedTo: { $exists: false } },
         { assignedTo: null }
@@ -899,4 +906,123 @@ export const deleteOfficer = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message })
   }
 }
+
+// Admin: Classify a complaint pending classification into an authoritative IssueType
+export const classifyReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { issueTypeId, issueTypeCode, newIssueType } = req.body
+
+    const report = await Report.findById(id)
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Report not found' })
+    }
+
+    let resolvedIssueType = null
+
+    // Option 1: Inline creation of new IssueType mapped to existing active Department
+    if (newIssueType && newIssueType.name && newIssueType.departmentId) {
+      const { name, departmentId, description } = newIssueType
+      const dept = await Department.findById(departmentId)
+      if (!dept) {
+        return res.status(404).json({ success: false, message: 'Selected department not found' })
+      }
+      if (!dept.isActive) {
+        return res.status(400).json({ success: false, message: 'Selected department is inactive. Please activate it first.' })
+      }
+
+      const trimmedName = name.trim()
+      const code = String(newIssueType.code || trimmedName)
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+
+      // Check if issue type already exists
+      resolvedIssueType = await IssueType.findOne({
+        $or: [{ name: new RegExp(`^${trimmedName}$`, 'i') }, { code }]
+      }).populate('department', 'name code isActive')
+
+      if (!resolvedIssueType) {
+        const created = await IssueType.create({
+          name: trimmedName,
+          code,
+          description: description ? description.trim() : '',
+          department: dept._id,
+          departmentCode: dept.code,
+          isActive: true
+        })
+        resolvedIssueType = await IssueType.findById(created._id).populate('department', 'name code isActive')
+      }
+    } else if (issueTypeId) {
+      resolvedIssueType = await IssueType.findById(issueTypeId).populate('department', 'name code isActive')
+    } else if (issueTypeCode) {
+      resolvedIssueType = await IssueType.findOne({ code: String(issueTypeCode).trim().toUpperCase(), isActive: true }).populate('department', 'name code isActive')
+    } else {
+      return res.status(400).json({ success: false, message: 'Issue type ID, code, or new issue type details are required' })
+    }
+
+    if (!resolvedIssueType) {
+      return res.status(404).json({ success: false, message: 'Issue type not found or inactive' })
+    }
+
+    if (!resolvedIssueType.department || resolvedIssueType.department.isActive === false) {
+      return res.status(400).json({ success: false, message: 'Associated department is missing or inactive' })
+    }
+
+    // Update report fields
+    report.issueType = resolvedIssueType.name || resolvedIssueType.code
+    report.department = resolvedIssueType.department.code
+    report.status = 'PENDING'
+
+    // Run existing automatic officer assignment logic for this report
+    const reportBuilding = String(report.location?.building || report.location?.ward || '').trim()
+    let assignedOfficer = null
+
+    if (reportBuilding) {
+      const normReportBuilding = normalizeBuilding(reportBuilding)
+      const normReportDept = normalizeDepartment(report.department)
+
+      const activeOfficers = await User.find({ role: 'officer', isActive: { $ne: false } }).sort({ createdAt: 1 })
+      const eligibleOfficers = activeOfficers.filter(o => {
+        if (o.isActive === false) return false
+        if (normalizeDepartment(o.department) !== normReportDept) return false
+        const oBuildings = getOfficerBuildings(o)
+        return oBuildings.some(b => normalizeBuilding(b) === normReportBuilding)
+      })
+
+      if (eligibleOfficers.length > 0) {
+        // Workload-based selection: select officer with lowest active workload
+        const officerWorkloads = await Promise.all(eligibleOfficers.map(async (off) => {
+          const activeCount = await Report.countDocuments({
+            assignedTo: off._id,
+            status: { $in: ['PENDING', 'IN_PROGRESS'] }
+          })
+          return { officer: off, activeCount }
+        }))
+        officerWorkloads.sort((a, b) => a.activeCount - b.activeCount)
+        assignedOfficer = officerWorkloads[0].officer
+        report.assignedTo = assignedOfficer._id
+      } else {
+        report.assignedTo = null
+      }
+    }
+
+    await report.save()
+
+    const updatedReport = await Report.findById(report._id)
+      .populate('reportedBy', 'name email mobile studentId faculty course semester')
+      .populate('assignedTo', 'name email assignedBuilding assignedBuildings assignedWard department designation employeeId')
+
+    return res.status(200).json({
+      success: true,
+      message: `Complaint successfully classified under ${resolvedIssueType.name} (${resolvedIssueType.department.name}).${assignedOfficer ? ` Auto-assigned to ${assignedOfficer.name}.` : ' No matching staff member currently assigned to this building.'}`,
+      report: updatedReport
+    })
+  } catch (error) {
+    console.error('classifyReport error:', error)
+    return res.status(500).json({ success: false, message: error.message })
+  }
+}
+
 

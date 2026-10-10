@@ -17,7 +17,8 @@ import {
   toggleOfficerStatus,
   deleteOfficer,
   previewAutoAssignUnassigned,
-  autoAssignUnassignedReports
+  autoAssignUnassignedReports,
+  classifyReport
 } from '../controllers/adminController.js'
 
 import {
@@ -45,6 +46,8 @@ adminRouter.get('/reports', isAuth, isAdmin, getAllReports)
 adminRouter.get('/reports/preview-auto-assign', isAuth, isAdmin, previewAutoAssignUnassigned)
 adminRouter.post('/reports/auto-assign-unassigned', isAuth, isAdmin, autoAssignUnassignedReports)
 adminRouter.patch('/reports/:id/status', isAuth, isAdmin, updateReportStatus)
+adminRouter.patch('/reports/:id/classify', isAuth, isAdmin, classifyReport)
+adminRouter.post('/reports/:id/classify', isAuth, isAdmin, classifyReport)
 adminRouter.patch('/reports/:id/assign', isAuth, isAdmin, assignOfficerToReport)
 adminRouter.post('/reports/:id/assign', isAuth, isAdmin, assignOfficerToReport)
 adminRouter.get('/building-summary', isAuth, isAdmin, getWardSummary)

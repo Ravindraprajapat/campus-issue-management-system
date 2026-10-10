@@ -19,12 +19,14 @@ const CAMPUS_BUILDINGS = PARUL_CAMPUS_BUILDINGS
 const STATUS_COLORS = {
   PENDING: 'bg-yellow-100 text-yellow-700 border-yellow-200',
   IN_PROGRESS: 'bg-blue-100 text-blue-700 border-blue-200',
-  RESOLVED: 'bg-green-100 text-green-700 border-green-200'
+  RESOLVED: 'bg-green-100 text-green-700 border-green-200',
+  PENDING_CLASSIFICATION: 'bg-purple-100 text-purple-700 border-purple-200'
 }
 const STATUS_ICONS = {
   PENDING: <AlertCircle size={13} />,
   IN_PROGRESS: <Clock size={13} />,
-  RESOLVED: <CheckCircle size={13} />
+  RESOLVED: <CheckCircle size={13} />,
+  PENDING_CLASSIFICATION: <AlertCircle size={13} className="text-purple-600" />
 }
 const PRIORITY_COLORS = {
   HIGH: 'bg-red-100 text-red-700',
@@ -110,13 +112,29 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
   const [deptsLoading, setDeptsLoading] = useState(false)
   const [deptsError, setDeptsError] = useState('')
 
+  // Classification Modal State
+  const [showClassifyModal, setShowClassifyModal] = useState(false)
+  const [selectedReportToClassify, setSelectedReportToClassify] = useState(null)
+  const [classifyMode, setClassifyMode] = useState('existing') // 'existing' | 'new'
+  const [activeIssueTypesList, setActiveIssueTypesList] = useState([])
+  const [selectedIssueTypeId, setSelectedIssueTypeId] = useState('')
+  const [rawActiveDepartments, setRawActiveDepartments] = useState([])
+  const [newIssueTypeForm, setNewIssueTypeForm] = useState({
+    name: '',
+    departmentId: '',
+    description: ''
+  })
+  const [classifying, setClassifying] = useState(false)
+  const [classifyError, setClassifyError] = useState('')
+
   const fetchActiveDepartments = useCallback(async () => {
     setDeptsLoading(true)
     setDeptsError('')
     try {
       const { data } = await axios.get(`${serverUrl}/api/admin/active-departments`, { withCredentials: true })
       if (data.success && Array.isArray(data.departments)) {
-        setDepartmentsList(data.departments.map(d => ({ value: d.code, label: d.name })))
+        setRawActiveDepartments(data.departments)
+        setDepartmentsList(data.departments.map(d => ({ value: d.code, label: d.name, id: d._id })))
       } else {
         setDeptsError('Unable to load departments. Please try again.')
       }
@@ -128,11 +146,88 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
     }
   }, [])
 
+  const fetchActiveIssueTypes = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${serverUrl}/api/admin/active-issue-types`, { withCredentials: true })
+      if (data.success && Array.isArray(data.issueTypes)) {
+        setActiveIssueTypesList(data.issueTypes)
+      }
+    } catch (err) {
+      console.error('Failed to fetch active issue types:', err)
+    }
+  }, [])
+
+  const handleOpenClassifyModal = (report) => {
+    setSelectedReportToClassify(report)
+    setClassifyMode('existing')
+    setSelectedIssueTypeId('')
+    setNewIssueTypeForm({
+      name: report?.aiAnalysis?.detectedType || report?.aiDetectedIssue || report?.issueType || '',
+      departmentId: '',
+      description: report?.description || ''
+    })
+    setClassifyError('')
+    setShowClassifyModal(true)
+    fetchActiveDepartments()
+    fetchActiveIssueTypes()
+  }
+
+  const handleConfirmClassification = async () => {
+    if (!selectedReportToClassify) return
+    setClassifying(true)
+    setClassifyError('')
+
+    try {
+      let payload = {}
+      if (classifyMode === 'existing') {
+        if (!selectedIssueTypeId) {
+          setClassifyError('Please select an active issue type.')
+          setClassifying(false)
+          return
+        }
+        payload = { issueTypeId: selectedIssueTypeId }
+      } else {
+        if (!newIssueTypeForm.name.trim()) {
+          setClassifyError('Please enter an issue type name.')
+          setClassifying(false)
+          return
+        }
+        if (!newIssueTypeForm.departmentId) {
+          setClassifyError('Please select an active department.')
+          setClassifying(false)
+          return
+        }
+        payload = {
+          newIssueType: {
+            name: newIssueTypeForm.name.trim(),
+            departmentId: newIssueTypeForm.departmentId,
+            description: newIssueTypeForm.description.trim()
+          }
+        }
+      }
+
+      const { data } = await axios.patch(
+        `${serverUrl}/api/admin/reports/${selectedReportToClassify._id}/classify`,
+        payload,
+        { withCredentials: true }
+      )
+
+      setShowClassifyModal(false)
+      setSelectedReportToClassify(null)
+      fetchAll()
+    } catch (err) {
+      console.error('Classification error:', err)
+      setClassifyError(err?.response?.data?.message || 'Failed to classify issue.')
+    } finally {
+      setClassifying(false)
+    }
+  }
+
   useEffect(() => {
-    if (showStaffModal) {
+    if (showStaffModal || showClassifyModal) {
       fetchActiveDepartments()
     }
-  }, [showStaffModal, fetchActiveDepartments])
+  }, [showStaffModal, showClassifyModal, fetchActiveDepartments])
 
   const handleCreateStaffForProblem = (report) => {
     const targetDept = report?.department || ''
@@ -820,16 +915,58 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
                                           {bReports.map(r => (
                                             <tr key={r._id} className="hover:bg-slate-50/80 transition">
                                               <td className="px-4 py-3 font-semibold text-slate-800">
-                                                {r.issueType?.replace('_', ' ') || r.aiAnalysis?.detectedType?.replace('_', ' ') || 'Issue'}
-                                                {r.location?.room && <span className="text-slate-400 font-normal ml-1"> (Room {r.location.room})</span>}
+                                                {r.status === 'PENDING_CLASSIFICATION' ? (
+                                                  <div>
+                                                    <div className="font-bold text-purple-950 flex items-center gap-1.5">
+                                                      <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                                                      <span>AI Detected Issue: {r.aiAnalysis?.detectedType || r.aiDetectedIssue || r.issueType || 'Detected Issue'}</span>
+                                                    </div>
+                                                    <div className="mt-1 flex items-center gap-2">
+                                                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800 border border-purple-200">
+                                                        Pending Admin Classification
+                                                      </span>
+                                                      {r.aiAnalysis?.confidence && (
+                                                        <span className="text-[10px] text-slate-500 font-medium">
+                                                          ({(r.aiAnalysis.confidence * 100).toFixed(0)}% AI confidence)
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                    {r.location?.room && <div className="text-slate-400 font-normal text-[11px] mt-0.5">Room: {r.location.room}</div>}
+                                                  </div>
+                                                ) : (
+                                                  <>
+                                                    {r.issueType?.replace('_', ' ') || r.aiAnalysis?.detectedType?.replace('_', ' ') || 'Issue'}
+                                                    {r.location?.room && <span className="text-slate-400 font-normal ml-1"> (Room {r.location.room})</span>}
+                                                  </>
+                                                )}
                                               </td>
                                               <td className="px-4 py-3 text-slate-600">
-                                                <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-100">
-                                                  {DEPARTMENT_LABELS[r.department] || r.department || 'N/A'}
-                                                </span>
+                                                {r.status === 'PENDING_CLASSIFICATION' || !r.department ? (
+                                                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-300">
+                                                    Not Classified
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-100">
+                                                    {DEPARTMENT_LABELS[r.department] || r.department || 'N/A'}
+                                                  </span>
+                                                )}
                                               </td>
                                               <td className="px-4 py-3">
-                                                {r.assignedTo ? (
+                                                {r.status === 'PENDING_CLASSIFICATION' ? (
+                                                  <div className="space-y-1.5">
+                                                    <span className="text-amber-700 font-bold text-[11px] flex items-center gap-1">
+                                                      <AlertCircle size={12} className="text-amber-600" /> Unassigned
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleOpenClassifyModal(r)}
+                                                      className="inline-flex items-center gap-1 text-[10px] font-bold bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1 rounded-md transition cursor-pointer shadow-xs"
+                                                      title="Classify this issue to route department and assign staff"
+                                                    >
+                                                      ⚡ Classify Issue
+                                                    </button>
+                                                  </div>
+                                                ) : r.assignedTo ? (
                                                   <div className="font-semibold text-emerald-700 flex items-center gap-1">
                                                     <UserCheck size={12} />
                                                     <span>{r.assignedTo.name || 'Assigned Staff'}</span>
@@ -856,10 +993,16 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
                                                 </span>
                                               </td>
                                               <td className="px-4 py-3">
-                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_COLORS[r.status]}`}>
-                                                  {STATUS_ICONS[r.status]}
-                                                  {r.status?.replace('_', ' ')}
-                                                </span>
+                                                {r.status === 'PENDING_CLASSIFICATION' ? (
+                                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border bg-purple-100 text-purple-700 border-purple-200">
+                                                    <AlertCircle size={11} /> Pending Admin Classification
+                                                  </span>
+                                                ) : (
+                                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_COLORS[r.status]}`}>
+                                                    {STATUS_ICONS[r.status]}
+                                                    {r.status?.replace('_', ' ')}
+                                                  </span>
+                                                )}
                                               </td>
                                               <td className="px-4 py-3 text-slate-400">
                                                 {new Date(r.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -931,7 +1074,26 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
                           <tr key={r._id} className="border-b border-slate-50 hover:bg-slate-50 transition">
                             <td className="px-4 py-4 text-slate-400">{i + 1}</td>
                             <td className="px-4 py-4 font-medium text-slate-800">
-                              {r.aiAnalysis?.detectedType?.replace('_', ' ') || 'N/A'}
+                              {r.status === 'PENDING_CLASSIFICATION' ? (
+                                <div>
+                                  <div className="font-bold text-purple-950 flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                                    <span>AI Detected Issue: {r.aiAnalysis?.detectedType || r.aiDetectedIssue || r.issueType || 'Detected Issue'}</span>
+                                  </div>
+                                  <div className="mt-1 flex items-center gap-1.5">
+                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800 border border-purple-200">
+                                      Pending Admin Classification
+                                    </span>
+                                    {r.aiAnalysis?.confidence && (
+                                      <span className="text-[10px] text-slate-500 font-medium">
+                                        ({(r.aiAnalysis.confidence * 100).toFixed(0)}% AI confidence)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                r.aiAnalysis?.detectedType?.replace('_', ' ') || r.issueType?.replace('_', ' ') || 'N/A'
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="font-medium text-slate-800">{r.reportedBy?.name || 'N/A'}</div>
@@ -952,13 +1114,32 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
                               </span>
                             </td>
                             <td className="px-4 py-4">
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_COLORS[r.status]}`}>
-                                {STATUS_ICONS[r.status]}
-                                {r.status?.replace('_', ' ')}
-                              </span>
+                              {r.status === 'PENDING_CLASSIFICATION' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border bg-purple-100 text-purple-700 border-purple-200">
+                                  <AlertCircle size={12} /> Pending Admin Classification
+                                </span>
+                              ) : (
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_COLORS[r.status]}`}>
+                                  {STATUS_ICONS[r.status]}
+                                  {r.status?.replace('_', ' ')}
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-4 text-xs text-slate-600">
-                              {(() => {
+                              {r.status === 'PENDING_CLASSIFICATION' ? (
+                                <div className="space-y-1">
+                                  <span className="font-semibold text-amber-700 text-xs flex items-center gap-1">
+                                    <AlertCircle size={12} /> Unassigned
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenClassifyModal(r)}
+                                    className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-[10px] font-bold transition cursor-pointer shadow-xs"
+                                  >
+                                    ⚡ Classify Issue
+                                  </button>
+                                </div>
+                              ) : (() => {
                                 const rBuilding = (r.location?.building || r.location?.ward || '').trim().toLowerCase()
                                 const rDept = String(r.department || '').trim().toLowerCase()
                                 const eligibleOfficers = officers.filter(o => {
@@ -1002,16 +1183,26 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
                               ) : <span className="text-slate-300 text-xs">No image</span>}
                             </td>
                             <td className="px-4 py-4">
-                              <div className="relative">
-                                <select value={r.status} disabled={updatingId === r._id}
-                                  onChange={e => handleStatusChange(r._id, e.target.value)}
-                                  className="appearance-none border border-slate-200 rounded-lg px-3 py-1.5 pr-7 text-xs focus:ring-2 focus:ring-sky-400 focus:outline-none bg-white cursor-pointer disabled:opacity-50">
-                                  <option value="PENDING">Pending</option>
-                                  <option value="IN_PROGRESS">In Progress</option>
-                                  <option value="RESOLVED">Resolved</option>
-                                </select>
-                                <ChevronDown size={12} className="absolute right-2 top-2.5 text-slate-400 pointer-events-none" />
-                              </div>
+                              {r.status === 'PENDING_CLASSIFICATION' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenClassifyModal(r)}
+                                  className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-100 transition cursor-pointer"
+                                >
+                                  Classify First
+                                </button>
+                              ) : (
+                                <div className="relative">
+                                  <select value={r.status} disabled={updatingId === r._id}
+                                    onChange={e => handleStatusChange(r._id, e.target.value)}
+                                    className="appearance-none border border-slate-200 rounded-lg px-3 py-1.5 pr-7 text-xs focus:ring-2 focus:ring-sky-400 focus:outline-none bg-white cursor-pointer disabled:opacity-50">
+                                    <option value="PENDING">Pending</option>
+                                    <option value="IN_PROGRESS">In Progress</option>
+                                    <option value="RESOLVED">Resolved</option>
+                                  </select>
+                                  <ChevronDown size={12} className="absolute right-2 top-2.5 text-slate-400 pointer-events-none" />
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -1614,6 +1805,243 @@ const AdminIssues = ({ defaultTab = 'issues' }) => {
                   </div>
                 </form>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* CLASSIFY ISSUE MODAL */}
+      <AnimatePresence>
+        {showClassifyModal && selectedReportToClassify && (
+          <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-purple-100 relative my-8 overflow-hidden"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-900 to-indigo-950 text-white p-6 relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowClassifyModal(false)
+                    setSelectedReportToClassify(null)
+                  }}
+                  className="absolute right-4 top-4 text-slate-300 hover:text-white transition cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+                <div className="flex items-center gap-2 text-purple-300 text-xs font-semibold uppercase tracking-wider mb-1">
+                  <Zap size={15} />
+                  <span>Administrative Issue Routing</span>
+                </div>
+                <h2 className="text-xl font-bold">Classify Maintenance Issue</h2>
+                <p className="text-xs text-purple-200 mt-1 leading-relaxed">
+                  Assign an authoritative issue type and department to this student-reported complaint. Once classified, the system will automatically route and assign the matching maintenance staff.
+                </p>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+                {classifyError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                    <AlertCircle size={15} className="shrink-0" />
+                    <span>{classifyError}</span>
+                  </div>
+                )}
+
+                {/* Complaint Summary Card */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex gap-4 items-start">
+                  {selectedReportToClassify.imageUrl ? (
+                    <a href={selectedReportToClassify.imageUrl} target="_blank" rel="noreferrer" className="shrink-0">
+                      <img
+                        src={selectedReportToClassify.imageUrl}
+                        alt="Damage evidence"
+                        className="w-20 h-20 object-cover rounded-lg border border-slate-300 shadow-xs hover:scale-105 transition"
+                      />
+                    </a>
+                  ) : null}
+                  <div className="flex-1 min-w-0 space-y-1 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-1">
+                      <span className="font-bold text-slate-900 text-sm">
+                        {selectedReportToClassify.aiAnalysis?.detectedType || selectedReportToClassify.aiDetectedIssue || selectedReportToClassify.issueType || 'Detected Issue'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">
+                        Pending Admin Classification
+                      </span>
+                    </div>
+
+                    <div className="text-slate-600">
+                      <span className="font-semibold text-slate-700">Location: </span>
+                      {selectedReportToClassify.location?.building || selectedReportToClassify.location?.ward || 'Campus Location'}
+                      {selectedReportToClassify.location?.room ? ` (Room ${selectedReportToClassify.location.room})` : ''}
+                    </div>
+
+                    {selectedReportToClassify.description && (
+                      <div className="text-slate-700 bg-white p-2 rounded-lg border border-slate-200 italic mt-1">
+                        "{selectedReportToClassify.description}"
+                      </div>
+                    )}
+
+                    {selectedReportToClassify.aiAnalysis?.reason && (
+                      <div className="text-[11px] text-purple-800 bg-purple-50 p-2 rounded-lg border border-purple-100">
+                        <strong>AI Observation: </strong>{selectedReportToClassify.aiAnalysis.reason}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Classification Mode Toggle */}
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-2 text-xs">
+                    Classification Strategy
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setClassifyMode('existing')}
+                      className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                        classifyMode === 'existing'
+                          ? 'bg-white text-purple-700 shadow-xs border border-purple-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>Map to Existing Issue Type</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassifyMode('new')}
+                      className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                        classifyMode === 'new'
+                          ? 'bg-white text-purple-700 shadow-xs border border-purple-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>+ Create New Issue Type</span>
+                    </button>
+                  </div>
+                </div>
+
+                {classifyMode === 'existing' ? (
+                  /* MODE 1: Map to Existing Active IssueType */
+                  <div className="space-y-2">
+                    <label className="block text-slate-700 font-semibold text-xs">
+                      Select Active Issue Type *
+                    </label>
+                    {activeIssueTypesList.length === 0 ? (
+                      <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between">
+                        <span>Loading active issue types...</span>
+                        <button type="button" onClick={fetchActiveIssueTypes} className="text-purple-600 font-bold hover:underline">Retry</button>
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedIssueTypeId}
+                        onChange={e => setSelectedIssueTypeId(e.target.value)}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-xs focus:ring-2 focus:ring-purple-400 focus:outline-none bg-white cursor-pointer"
+                      >
+                        <option value="">-- Choose Matching Active Issue Type --</option>
+                        {activeIssueTypesList.map(it => (
+                          <option key={it._id} value={it._id}>
+                            {it.name} ({it.department?.name || it.departmentCode || 'Campus Department'})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <p className="text-[11px] text-slate-400">
+                      Selecting an issue type automatically binds its authoritative department and triggers workload-balanced staff assignment.
+                    </p>
+                  </div>
+                ) : (
+                  /* MODE 2: Create New IssueType & Map to Existing Active Department */
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1 text-xs">
+                        New Issue Type Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={newIssueTypeForm.name}
+                        onChange={e => setNewIssueTypeForm({ ...newIssueTypeForm, name: e.target.value })}
+                        placeholder="e.g. Broken Laboratory Glassware"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-purple-400 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1 text-xs">
+                        Campus Department *
+                      </label>
+                      {deptsLoading ? (
+                        <div className="text-xs text-sky-600 bg-sky-50 p-2 rounded-xl border border-sky-100 flex items-center gap-2">
+                          <Loader2 size={13} className="animate-spin text-sky-500" />
+                          <span>Loading active departments...</span>
+                        </div>
+                      ) : (
+                        <select
+                          value={newIssueTypeForm.departmentId}
+                          onChange={e => setNewIssueTypeForm({ ...newIssueTypeForm, departmentId: e.target.value })}
+                          className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-purple-400 focus:outline-none bg-white cursor-pointer"
+                        >
+                          <option value="">-- Select Active Department --</option>
+                          {rawActiveDepartments.map(d => (
+                            <option key={d._id} value={d._id}>
+                              {d.name} ({d.code})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Department is strictly selected from active MongoDB campus departments.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1 text-xs">
+                        Description (Optional)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={newIssueTypeForm.description}
+                        onChange={e => setNewIssueTypeForm({ ...newIssueTypeForm, description: e.target.value })}
+                        placeholder="Brief description of this new issue category..."
+                        className="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-purple-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="bg-slate-50 border-t border-slate-200 p-4 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowClassifyModal(false)
+                    setSelectedReportToClassify(null)
+                  }}
+                  className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={classifying}
+                  onClick={handleConfirmClassification}
+                  className="px-5 py-2 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5"
+                >
+                  {classifying ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Classifying & Routing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={13} />
+                      <span>Confirm Classification & Auto-Assign Staff</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
